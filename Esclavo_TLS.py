@@ -17,7 +17,7 @@ username = "usuario1"
 password = "qwerty123"
 topicKeys = "chaos/keys"
 topicData = "chaos/data"
-ca_cert_path = "\etc\mosquitto\ca_certificates\ca.crt"
+ca_cert_path = "/home/tunchi/CifradoSlave/certs/ca.crt"
 
 
 # ========== PARAMETROS GLOBALES PARA ALMACENAMIENTO ==========
@@ -26,19 +26,27 @@ receivedData = None
 
 def on_connect(client, userdata, flags, rc):
     print(f"Conectado al broker MQTT con código de resultado: {rc}")
-    client.subscribe(topicData)  # <— SOLO datos aquí
+    client.subscribe(topicData) 
 
 
-def on_message_keys(client, userdata, msg):
-    global receivedKeys
-    receivedKeys = json.loads(msg.payload.decode())
-    print("Llaves de cifrado recibidos")
+def on_connect_keys(client, userdata, flags, rc, properties=None):
+    print(f"Conectado (TLS) keys rc: {rc}")
+    if rc == 0:
+        res, mid = client.subscribe(topicKeys)
+        print("Sub keys rc:", res, "mid:", mid)
+    else:
+        print("Error al conectar TLS (keys)")
+
 
 def on_message_data(client, userdata, msg):
     global receivedData
     receivedData = json.loads(msg.payload.decode())
     print("Datos recibidos")
 
+def on_message_keys(client, userdata, msg):
+    global receivedKeys
+    receivedKeys = json.loads(msg.payload.decode())
+    print("Keys recibidas")
 
 # ========== FUNCION DE ROSSLER ESCLAVO ==========
 def rossler_esclavo(t, state, y_master_interp, a, b, c, k):
@@ -49,7 +57,7 @@ def rossler_esclavo(t, state, y_master_interp, a, b, c, k):
     dzdt = b + z_s * (x_s - c)
     return [dxdt, dydt, dzdt]
 
-# vector_cifrado nmax logisticParams
+# vector_cifrado nmax logisticParamssu
 # ========== FUNCION PARA REVERTIR LA CONFUSIÓN ==========
 def sincronizacion(y_sinc, times, rosslerParams, time_sinc, keystream):
     h = 0.01
@@ -131,9 +139,9 @@ def main():
     client_keys.username_pw_set(username, password)
     client_keys.tls_set(ca_certs=ca_cert_path, tls_version=ssl.PROTOCOL_TLS_CLIENT)
     client_keys.tls_insecure_set(False)
-    client_keys.connect(broker, port_tls, 60)
+    client_keys.on_connect = on_connect_keys
     client_keys.message_callback_add(topicKeys, on_message_keys)
-    client_keys.subscribe(topicKeys)
+    client_keys.connect(broker, port_tls, 60)
     client_keys.loop_start()
 
     print("Esperando datos del maestro...")
@@ -145,12 +153,6 @@ def main():
     client.disconnect()
     client_keys.loop_stop()
     client_keys.disconnect()
-
-    # Verificar existencia de 'times'
-    if 'times' not in receivedData:
-        print("\nERROR: 'times' no encontrado en los datos recibidos")
-        print("Claves disponibles en receivedData:", receivedData.keys())
-        return
 
     # Extraer los parámetros
     rosslerParams = receivedKeys['rosslerParams']
@@ -187,7 +189,7 @@ def main():
     plt.grid(True)
     
     plt.tight_layout()
-    plt.savefig('sincronizacion_resultados.png')
+    plt.savefig('Resultados/sincronizacion_resultados.png')
     print("Resultados de sincronización guardados en sincronizacion_resultados.png")
     data_y = {
     'Tiempo': t_eval,
@@ -200,7 +202,7 @@ def main():
     df_trayectoria = pd.DataFrame(trayectoria_y)
     df_trayectoria.to_csv('trayectoria_y_esclavo.csv', index=False)
     df = pd.DataFrame(data_y)
-    df.to_csv('error_sincronizacion_Y.csv', index=False)
+    df.to_csv('Resultados/error_sincronizacion_Y.csv', index=False)
     print("Datos de error guardados en error_sincronizacion_Y.csv")
     print("Proceso de sincronización completado.")
 
@@ -237,7 +239,7 @@ def main():
     )
     print("Difusión revertida. Imagen descifrada generada.")
     # Guardar imagen descifrada
-    imagen_descifrada.save('imagen_descifrada.png')
+    imagen_descifrada.save('Resultados/imagen_descifrada.png')
     print("Imagen descifrada guardada como imagen_descifrada.png")
 
 if __name__ == "__main__":
