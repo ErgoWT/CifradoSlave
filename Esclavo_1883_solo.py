@@ -13,7 +13,7 @@ from PIL import Image
 
 
 # ========== CONFIGURACION MQTT ==========
-BROKER = "192.168.0.55"
+BROKER = "192.168.50.230"
 PORT = 1883
 USERNAME = "usuario1"
 PASSWORD = "qwerty123"
@@ -106,7 +106,8 @@ def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, nmax):
         kind='cubic',
         fill_value="extrapolate"
     )    
-
+    b = 0.9
+    
     sol_slave = solve_ivp(
         fun = rossler_esclavo,
         t_span = t_span,
@@ -114,7 +115,7 @@ def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, nmax):
         t_eval = t_eval,
         args = (y_master_interp, 
                 ROSSLER_PARAMS['a'], 
-                ROSSLER_PARAMS['b'], 
+                b, 
                 ROSSLER_PARAMS['c'], 
                 K),
         rtol = 1e-8,

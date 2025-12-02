@@ -33,13 +33,15 @@ K = 2.0
 X0 = [1.0, 1.0, 1.0]
 
 # ========== RUTAS Y ARCHIVOS ==========
-CARPETA_RESULTADOS = Path("Hamming_Resultados")
+CARPETA_RESULTADOS = Path("Resultados_TLS_KEYSTREAM")
+CARPETA_RESULTADOS_HAMMING = Path("Hamming_Resultados")
 
 RUTA_IMAGEN_ORIGINAL = Path("Prueba.jpg")
+RUTA_TIMINGS = CARPETA_RESULTADOS / "tiempo_procesos_esclavo.csv"
 RUTA_HISTOGRAMA_IMAGENES = CARPETA_RESULTADOS / "histogramas.png"
 RUTA_IMAGEN_DESCIFRADA = CARPETA_RESULTADOS / "imagen_descifrada.png"
-RUTA_DISTANCIA_HAMMING = CARPETA_RESULTADOS / "hamming_vs_a.png"
-RUTA_DISTANCIA_HAMMING_CSV = CARPETA_RESULTADOS / "hamming_vs_a.csv"
+RUTA_DISTANCIA_HAMMING = CARPETA_RESULTADOS_HAMMING / "hamming_vs_a.png"
+RUTA_DISTANCIA_HAMMING_CSV = CARPETA_RESULTADOS_HAMMING / "hamming_vs_a.csv"
 
 
 
@@ -254,17 +256,37 @@ def experimento_hamming_vs_a(
         params_test = dict(ROSSLER_PARAMS)
         params_test['a'] = float(a_val)
         
-    # Sincronizar con el nuevo a
-    _, _, y_slave, t_slave, x_sinc = sincronizacion(
-        y_sinc, times, params_test, time_sinc, keystream, nmax
-    )
-    # Descifrar
-    difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
-    imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
-    
-    # Calcular la distancia hamming
-    hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
-    resultados.append()
+        # Sincronizar con el nuevo a
+        _, _, y_slave, t_slave, x_sinc = sincronizacion(
+            y_sinc, times, params_test, time_sinc, keystream, nmax
+        )
+        # Descifrar
+        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
+
+        # Calcular la distancia hamming
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+        resultados.append({
+            "a": a_val,
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+        
+        df_resultados = pd.DataFrame(resultados)
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV, index=False)
+        print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV}")
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_resultados['a'], df_resultados["hamming_norm"], marker = "o", linewidth = 1.5)
+        plt.xlabel("a")
+        plt.ylabel("Distancia de Hamming")
+        plt.title("Distancia de hamming imagen original vs descifrada")
+        plt.grid(True, alpha = 0.3)
+        plt.tight_layout()
+        plt.savefig(RUTA_DISTANCIA_HAMMING, dpi=300)
+        plt.close()
+        print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING}")
+
 
 def tiempos_procesos(tiempo_mqtt, tiempo_sincronizacion, tiempo_descifrado, tiempo_total):
     df_tiempos = pd.DataFrame([{
@@ -352,6 +374,19 @@ def main():
     # ========== GUARDADO DE RESULTADOS ==========
     error_y = np.abs(y_sinc - y_slave)
     graficar_histogramas()
+    experimento_hamming_vs_a(
+        ROSSLER_PARAMS,
+        LOGISTIC_PARAMS,
+        y_sinc,
+        times,
+        time_sinc,
+        nmax,
+        keystream,
+        vector_cifrado,
+        ancho,
+        alto,
+        vector_logistico
+    )
     # ========== REGISTRO DE TIEMPOS ==========
     tiempo_mqtt = t_fin_mqtt - t_inicio_mqtt
     tiempo_sincronizacion = t_fin_sincronizacion - t_inicio_sincronizacion
