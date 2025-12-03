@@ -29,7 +29,7 @@ RECEIVED_DATA = None
 
 # ========== PARAMETROS DE ROSSLER ==========
 H = 0.01
-K = 1.0
+K = 2.0
 X0 = [1.0, 1.0, 1.0]
 
 # ========== RUTAS Y ARCHIVOS ==========
@@ -73,12 +73,16 @@ def on_message_keys(client, userdata, msg):
     print(f"[MQTT-ESCLAVO] Keys recibidas en {msg.topic}")
 
 # ========== FUNCION DE ROSSLER ESCLAVO ==========
-def rossler_esclavo(t, state, y_master_interp, a, b, c, k):
-    x_s, y_s, z_s = state
-    y_m = y_master_interp(t)
-    dxdt = -y_s - z_s
-    dydt = x_s + a * y_s + k * (y_m - y_s)
-    dzdt = b + z_s * (x_s - c)
+def rossler_slave(t, y_vec, a, b, c, k, y_master_series, master_len, t_span, t_eval_slave):
+    x, y, z = y_vec
+    # Encuentra el índice más cercano en los tiempos del esclavo
+    idx = np.searchsorted(t_eval_slave, t)
+    if idx >= master_len:
+        idx = master_len - 1
+    y_m = y_master_series[idx]
+    dxdt = -y - z
+    dydt = x + a * y + k * (y_m - y)
+    dzdt = b + z * (x - c)
     return [dxdt, dydt, dzdt]
 
 # ========== FUNCION DEL MAPA LOGISTICO ==========
@@ -102,34 +106,27 @@ def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
     t_span = (0, iteraciones*H)
     t_eval = np.linspace(0, iteraciones*H, iteraciones)
 
-    y_master_interp = interp1d(
-        times,
-        y_sinc,
-        kind='cubic',
-        fill_value="extrapolate"
-    )    
+    master_l = len(y_sinc)    
 
     b_error = 0.3
     
+    a = ROSSLER_PARAMS["a"]
+    b = ROSSLER_PARAMS["b"]
+    c = ROSSLER_PARAMS["c"]    
+    
     sol_slave = solve_ivp(
-        fun = rossler_esclavo,
-        t_span = t_span,
-        y0 = X0,
-        t_eval = t_eval,
-        args = (y_sinc, 
-                ROSSLER_PARAMS['a'], 
-                ROSSLER_PARAMS['b'], 
-                ROSSLER_PARAMS['c'], 
-                K),
-        rtol = 1e-4,
-        atol = 1e-4,
-        method='RK45'
+        lambda t, y: rossler_slave(t, y, a, b, c, K, y_sinc, master_l, t_span, t_eval),
+        t_span,
+        X0,
+        t_eval=t_eval,
+        rtol=1e-5,
+        atol=1e-5
     )
     
     y_slave = sol_slave.y[1]
     x_sinc = sol_slave.y[0][time_sinc:time_sinc + keystream]
     x_sinc = np.resize(x_sinc, nmax)
-    return y_master_interp, t_eval, y_slave, sol_slave.t, x_sinc
+    return t_eval, y_slave, sol_slave.t, x_sinc
 
 def revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax):
 
@@ -381,7 +378,7 @@ def main():
     # ========== PROCESO DE SINCRONIZACIÓN ==========
     print("[SINCRONIZACIÓN] Sincronizando sistema esclavo...")
     t_inicio_sincronizacion = time.perf_counter()
-    y_master_interp, t_eval, y_slave, t_slave, x_sinc = sincronizacion(
+    t_eval, y_slave, t_slave, x_sinc = sincronizacion(
         y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax
     )
     t_fin_sincronizacion = time.perf_counter()

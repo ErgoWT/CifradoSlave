@@ -426,7 +426,7 @@ def coeficiente_correlacion_imagenes(imagen_original, imagen_descifrada):
         corr_matrix = np.corrcoef(orig_flat, decr_flat)
         corr = float(corr_matrix[0, 1])
 
-    print(f"[CORR] Coeficiente de correlación (Pearson, escala de grises): {corr:.6f}")
+    print(f"[CORR] Coeficiente de correlación: {corr:.6f}")
     return corr
 
 
@@ -516,45 +516,45 @@ def main():
     # ========== GUARDADO DE RESULTADOS ==========
     error_y = np.abs(y_sinc - y_slave)
     graficar_histogramas()
-    experimento_hamming_vs_a(
-        ROSSLER_PARAMS,
-        LOGISTIC_PARAMS,
-        y_sinc,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
-        ancho,
-        alto,
-        vector_logistico
-    )
-    experimento_hamming_vs_b(
-        ROSSLER_PARAMS,
-        LOGISTIC_PARAMS,
-        y_sinc,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
-        ancho,
-        alto,
-        vector_logistico
-    )
-    experimento_hamming_vs_c(
-        ROSSLER_PARAMS,
-        LOGISTIC_PARAMS,
-        y_sinc,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
-        ancho,
-        alto,
-        vector_logistico
-    )
+    # experimento_hamming_vs_a(
+    #     ROSSLER_PARAMS,
+    #     LOGISTIC_PARAMS,
+    #     y_sinc,
+    #     times,
+    #     time_sinc,
+    #     nmax,
+    #     keystream,
+    #     vector_cifrado,
+    #     ancho,
+    #     alto,
+    #     vector_logistico
+    # )
+    # experimento_hamming_vs_b(
+    #     ROSSLER_PARAMS,
+    #     LOGISTIC_PARAMS,
+    #     y_sinc,
+    #     times,
+    #     time_sinc,
+    #     nmax,
+    #     keystream,
+    #     vector_cifrado,
+    #     ancho,
+    #     alto,
+    #     vector_logistico
+    # )
+    # experimento_hamming_vs_c(
+    #     ROSSLER_PARAMS,
+    #     LOGISTIC_PARAMS,
+    #     y_sinc,
+    #     times,
+    #     time_sinc,
+    #     nmax,
+    #     keystream,
+    #     vector_cifrado,
+    #     ancho,
+    #     alto,
+    #     vector_logistico
+    # )
 
         # ========== CORRELACIÓN IMAGEN ORIGINAL VS DESCIFRADA (CASO BASE) ==========
     img_original_base = Image.open(RUTA_IMAGEN_ORIGINAL)
