@@ -40,8 +40,8 @@ RUTA_IMAGEN_ORIGINAL = Path("Prueba.jpg")
 RUTA_TIMINGS = CARPETA_RESULTADOS / "tiempo_procesos_esclavo.csv"
 RUTA_HISTOGRAMA_IMAGENES = CARPETA_RESULTADOS / "histogramas.png"
 RUTA_IMAGEN_DESCIFRADA = CARPETA_RESULTADOS / "imagen_descifrada.png"
-RUTA_DISTANCIA_HAMMING = CARPETA_RESULTADOS_HAMMING / "hamming_vs_a.png"
-RUTA_DISTANCIA_HAMMING_CSV = CARPETA_RESULTADOS_HAMMING / "hamming_vs_a.csv"
+RUTA_DISTANCIA_HAMMING = CARPETA_RESULTADOS_HAMMING / "hamming_vs_c.png"
+RUTA_DISTANCIA_HAMMING_CSV = CARPETA_RESULTADOS_HAMMING / "hamming_vs_c.csv"
 
 
 
@@ -206,7 +206,7 @@ def graficar_histogramas():
     plt.savefig(RUTA_HISTOGRAMA_IMAGENES, dpi=300)
     
 def distancia_hamming(imagen_original, imagen_descifrada):
-    img_original = np.array(imagen_original.convert("RGB), dtype=np.uint8"))
+    img_original = np.array(imagen_original.convert("RGB"), dtype=np.uint8)
     img_descifrada = np.array(imagen_descifrada.convert("RGB"), dtype=np.uint8)
     
     img_original = img_original.flatten()
@@ -246,15 +246,15 @@ def experimento_hamming_vs_a(
     vector_logistico
 ):
     img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
-    valores_a = np.arange(0.05, 1.0, 0.05)
+    valores_a = np.arange(5.0, 6.0, 0.01)
     resultados = []
     
-    print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'a' de Rössler...")
+    print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'c' de Rössler...")
     
-    for a_val in valores_a:
-        print(f"[HAMMING] Evaluando a = {a_val:.2f}...")
+    for c_val in valores_a:
+        print(f"[HAMMING] Evaluando c = {c_val:.2f}...")
         params_test = dict(ROSSLER_PARAMS)
-        params_test['a'] = float(a_val)
+        params_test['c'] = float(c_val)
         
         # Sincronizar con el nuevo a
         _, _, y_slave, t_slave, x_sinc = sincronizacion(
@@ -267,7 +267,7 @@ def experimento_hamming_vs_a(
         # Calcular la distancia hamming
         hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
         resultados.append({
-            "a": a_val,
+            "c": c_val,
             "hamming_abs": hamming_abs,
             "hamming_norm": hamming_norm
         })
@@ -277,8 +277,8 @@ def experimento_hamming_vs_a(
         print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV}")
 
         plt.figure(figsize=(10, 6))
-        plt.plot(df_resultados['a'], df_resultados["hamming_norm"], marker = "o", linewidth = 1.5)
-        plt.xlabel("a")
+        plt.plot(df_resultados['c'], df_resultados["hamming_abs"], marker = "o", linewidth = 1.5)
+        plt.xlabel("c")
         plt.ylabel("Distancia de Hamming")
         plt.title("Distancia de hamming imagen original vs descifrada")
         plt.grid(True, alpha = 0.3)
