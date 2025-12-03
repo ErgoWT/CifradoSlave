@@ -14,7 +14,7 @@ from PIL import Image
 
 
 # ========== CONFIGURACION MQTT ==========
-BROKER = "192.168.0.55"
+BROKER = "raspberrypiJED.local"
 PORT = 8883
 USERNAME = "usuario1"
 PASSWORD = "qwerty123"
@@ -40,10 +40,14 @@ RUTA_IMAGEN_ORIGINAL = Path("Prueba.jpg")
 RUTA_TIMINGS = CARPETA_RESULTADOS / "tiempo_procesos_esclavo.csv"
 RUTA_HISTOGRAMA_IMAGENES = CARPETA_RESULTADOS / "histogramas.png"
 RUTA_IMAGEN_DESCIFRADA = CARPETA_RESULTADOS / "imagen_descifrada.png"
-RUTA_DISTANCIA_HAMMING = CARPETA_RESULTADOS_HAMMING / "hamming_vs_c.png"
-RUTA_DISTANCIA_HAMMING_CSV = CARPETA_RESULTADOS_HAMMING / "hamming_vs_c.csv"
+RUTA_DISTANCIA_HAMMING_A = CARPETA_RESULTADOS_HAMMING / "hamming_vs_a.png"
+RUTA_DISTANCIA_HAMMING_CSV_A = CARPETA_RESULTADOS_HAMMING / "hamming_vs_a.csv"
+RUTA_DISTANCIA_HAMMING_B = CARPETA_RESULTADOS_HAMMING / "hamming_vs_b.png"
+RUTA_DISTANCIA_HAMMING_CSV_B = CARPETA_RESULTADOS_HAMMING / "hamming_vs_b.csv"
+RUTA_DISTANCIA_HAMMING_C = CARPETA_RESULTADOS_HAMMING / "hamming_vs_c.png"
+RUTA_DISTANCIA_HAMMING_CSV_C = CARPETA_RESULTADOS_HAMMING / "hamming_vs_c.csv"
 
-
+RUTA_CORRELACION_BASE = CARPETA_RESULTADOS_HAMMING / "correlacion_original_vs_descifrada.csv"
 
 
 def on_connect(client, userdata, flags, rc):
@@ -206,8 +210,8 @@ def graficar_histogramas():
     plt.savefig(RUTA_HISTOGRAMA_IMAGENES, dpi=300)
     
 def distancia_hamming(imagen_original, imagen_descifrada):
-    img_original = np.array(imagen_original.convert("RGB"), dtype=np.uint8)
-    img_descifrada = np.array(imagen_descifrada.convert("RGB"), dtype=np.uint8)
+    img_original = np.array(imagen_original.convert("L"), dtype=np.uint8)
+    img_descifrada = np.array(imagen_descifrada.convert("L"), dtype=np.uint8)
     
     img_original = img_original.flatten()
     img_descifrada = img_descifrada.flatten()
@@ -246,17 +250,127 @@ def experimento_hamming_vs_a(
     vector_logistico
 ):
     img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
-    valores_a = np.arange(5.0, 6.0, 0.01)
+    valores_a = np.arange(0.0, 1.0 + 1e-6, 0.02)
+    resultados = []
+    
+    print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'a' de Rössler...")
+    
+    for a_val in valores_a:
+        print(f"[HAMMING] Evaluando a = {a_val:.2f}...")
+        params_test = dict(ROSSLER_PARAMS)
+        params_test['a'] = float(a_val)
+        
+        # Sincronizar con el nuevo a
+        _, _, y_slave, t_slave, x_sinc = sincronizacion(
+            y_sinc, times, params_test, time_sinc, keystream, nmax
+        )
+        # Descifrar
+        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
+
+        # Calcular la distancia hamming
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+        resultados.append({
+            "a": a_val,
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+        
+        df_resultados = pd.DataFrame(resultados)
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_A, index=False)
+        print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_A}")
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_resultados['a'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
+        plt.xlabel("a")
+        plt.ylabel("Distancia de Hamming")
+        plt.title("Distancia de hamming imagen original vs descifrada")
+        plt.grid(True, alpha = 0.3)
+        plt.tight_layout()
+        plt.savefig(RUTA_DISTANCIA_HAMMING_A, dpi=300)
+        plt.close()
+        print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_A}")
+
+def experimento_hamming_vs_b(
+    ROSSLER_PARAMS,
+    LOGISTIC_PARAMS,
+    y_sinc,
+    times,
+    time_sinc,
+    nmax,
+    keystream,
+    vector_cifrado,
+    ancho,
+    alto,
+    vector_logistico
+):
+    img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
+    valores_b = np.arange(0.0, 1.0 + 1e-6, 0.02)
+    resultados = []
+    
+    print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'b' de Rössler...")
+    
+    for b_val in valores_b:
+        print(f"[HAMMING] Evaluando b = {b_val:.2f}...")
+        params_test = dict(ROSSLER_PARAMS)
+        params_test['b'] = float(b_val)
+        
+        # Sincronizar con el nuevo b
+        _, _, y_slave, t_slave, x_sinc = sincronizacion(
+            y_sinc, times, params_test, time_sinc, keystream, nmax
+        )
+        # Descifrar
+        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
+
+        # Calcular la distancia hamming
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+        resultados.append({
+            "b": b_val,
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+        
+        df_resultados = pd.DataFrame(resultados)
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_B, index=False)
+        print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_B}")
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_resultados['b'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
+        plt.xlabel("b")
+        plt.ylabel("Distancia de Hamming")
+        plt.title("Distancia de hamming imagen original vs descifrada")
+        plt.grid(True, alpha = 0.3)
+        plt.tight_layout()
+        plt.savefig(RUTA_DISTANCIA_HAMMING_B, dpi=300)
+        plt.close()
+        print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_B}")
+
+def experimento_hamming_vs_c(
+    ROSSLER_PARAMS,
+    LOGISTIC_PARAMS,
+    y_sinc,
+    times,
+    time_sinc,
+    nmax,
+    keystream,
+    vector_cifrado,
+    ancho,
+    alto,
+    vector_logistico
+):
+    img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
+    valores_c = np.arange(5.0, 6.0 + 1e-6, 0.02)
     resultados = []
     
     print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'c' de Rössler...")
     
-    for c_val in valores_a:
+    for c_val in valores_c:
         print(f"[HAMMING] Evaluando c = {c_val:.2f}...")
         params_test = dict(ROSSLER_PARAMS)
         params_test['c'] = float(c_val)
         
-        # Sincronizar con el nuevo a
+        # Sincronizar con el nuevo c
         _, _, y_slave, t_slave, x_sinc = sincronizacion(
             y_sinc, times, params_test, time_sinc, keystream, nmax
         )
@@ -273,19 +387,47 @@ def experimento_hamming_vs_a(
         })
         
         df_resultados = pd.DataFrame(resultados)
-        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV, index=False)
-        print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV}")
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_C, index=False)
+        print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_C}")
 
         plt.figure(figsize=(10, 6))
-        plt.plot(df_resultados['c'], df_resultados["hamming_abs"], marker = "o", linewidth = 1.5)
+        plt.plot(df_resultados['c'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
         plt.xlabel("c")
         plt.ylabel("Distancia de Hamming")
         plt.title("Distancia de hamming imagen original vs descifrada")
         plt.grid(True, alpha = 0.3)
         plt.tight_layout()
-        plt.savefig(RUTA_DISTANCIA_HAMMING, dpi=300)
+        plt.savefig(RUTA_DISTANCIA_HAMMING_C, dpi=300)
         plt.close()
-        print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING}")
+        print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_C}")
+
+def coeficiente_correlacion_imagenes(imagen_original, imagen_descifrada):
+    """
+    Calcula el coeficiente de correlación de Pearson entre la imagen original
+    y la imagen descifrada (trabajando en escala de grises).
+    """
+    # Convertir a escala de grises y a float
+    img_orig = np.array(imagen_original.convert("L"), dtype=np.float64)
+    img_decr = np.array(imagen_descifrada.convert("L"), dtype=np.float64)
+
+    # Aplanar
+    orig_flat = img_orig.flatten()
+    decr_flat = img_decr.flatten()
+
+    # Emparejar longitudes
+    n = min(orig_flat.size, decr_flat.size)
+    orig_flat = orig_flat[:n]
+    decr_flat = decr_flat[:n]
+
+    # Evitar problemas de desviación estándar cero o muy pocos datos
+    if n < 2 or np.std(orig_flat) == 0 or np.std(decr_flat) == 0:
+        corr = 0.0
+    else:
+        corr_matrix = np.corrcoef(orig_flat, decr_flat)
+        corr = float(corr_matrix[0, 1])
+
+    print(f"[CORR] Coeficiente de correlación (Pearson, escala de grises): {corr:.6f}")
+    return corr
 
 
 def tiempos_procesos(tiempo_mqtt, tiempo_sincronizacion, tiempo_descifrado, tiempo_total):
@@ -387,6 +529,50 @@ def main():
         alto,
         vector_logistico
     )
+    experimento_hamming_vs_b(
+        ROSSLER_PARAMS,
+        LOGISTIC_PARAMS,
+        y_sinc,
+        times,
+        time_sinc,
+        nmax,
+        keystream,
+        vector_cifrado,
+        ancho,
+        alto,
+        vector_logistico
+    )
+    experimento_hamming_vs_c(
+        ROSSLER_PARAMS,
+        LOGISTIC_PARAMS,
+        y_sinc,
+        times,
+        time_sinc,
+        nmax,
+        keystream,
+        vector_cifrado,
+        ancho,
+        alto,
+        vector_logistico
+    )
+
+        # ========== CORRELACIÓN IMAGEN ORIGINAL VS DESCIFRADA (CASO BASE) ==========
+    img_original_base = Image.open(RUTA_IMAGEN_ORIGINAL)
+    coef_corr_base = coeficiente_correlacion_imagenes(img_original_base, imagen_descifrada)
+
+    # Guardar correlación en CSV (modo append)
+    df_corr_base = pd.DataFrame([{
+        "descripcion": "correlacion_original_vs_descifrada",
+        "coef_corr": coef_corr_base
+    }])
+    df_corr_base.to_csv(
+        RUTA_CORRELACION_BASE,
+        index=False,
+        mode="a",
+        header=not RUTA_CORRELACION_BASE.exists()
+    )
+    print(f"[CORR] Correlación base guardada en {RUTA_CORRELACION_BASE}")
+
     # ========== REGISTRO DE TIEMPOS ==========
     tiempo_mqtt = t_fin_mqtt - t_inicio_mqtt
     tiempo_sincronizacion = t_fin_sincronizacion - t_inicio_sincronizacion
