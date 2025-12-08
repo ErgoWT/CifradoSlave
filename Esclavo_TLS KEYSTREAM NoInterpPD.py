@@ -1,10 +1,3 @@
-"""
-Docstring for Esclavo_TLS KEYSTREAM NoInterp
-Experimento para implementar un sistema de sincronización sin utilizar interpolación
-Se implementan todos los análisis y gráficas correspondientes
-El canal de comunicación es seguro mediante TLS
-Se utiliza hamming para el análisis de sensibilidad a parámetros
-"""
 
 import json 
 import time 
@@ -32,11 +25,13 @@ RECEIVED_DATA = None
 
 # ========== PARAMETROS DE ROSSLER ==========
 H = 0.01
-K = 2.0
+KP = 0.5
+KD = 0.01
 X0 = [1.0, 1.0, 1.0]
 
 # ========== RUTAS Y ARCHIVOS ==========
-CARPETA_RESULTADOS = Path("No_Interpolar")
+CARPETA_RESULTADOS = Path("No_Interpolar_PD")
+CARPETA_RESULTADOS.mkdir(parents=True, exist_ok=True)
 
 # RUTAS SERIES TEMPORALES
 RUTA_SINCRONIZACION_X = CARPETA_RESULTADOS / "sincronizacion_x_resultados.png"
@@ -94,7 +89,7 @@ def rossler_slave(state, y_m, a, b, c, k):
     dzdt = b + z_s * (x_s - c)
     return np.array([dxdt, dydt, dzdt], dtype=float)
 
-def integrar_slave(y_maestro, h, a, b, c, k, x0):
+def integrar_slave_pd(y_maestro, dy_maestro, h, a, b, c, k, x0):
     n = len(y_maestro)
     t = np.linspace(0, (n - 1) * h, n, dtype=np.float64)
 
@@ -104,32 +99,49 @@ def integrar_slave(y_maestro, h, a, b, c, k, x0):
     x[0], y[0], z[0] = x0
 
     for i in range(n - 1):
-        y_m = y_maestro[i]
+        y_m  = y_maestro[i]
+        dy_m = dy_maestro[i]
+
         # k1
         dx1 = -y[i] - z[i]
-        dy1 = x[i] + a * y[i] + k * (y_m - y[i])
+        dy_base1 = x[i] + a * y[i]
         dz1 = b + z[i] * (x[i] - c)
+        dy_s1 = dy_base1
+        u1 = KP * (y_m - y[i]) + KD * (dy_m - dy_s1)
+        dy1 = dy_base1 + u1
+
         # k2
         x2 = x[i] + 0.5 * h * dx1
         y2 = y[i] + 0.5 * h * dy1
         z2 = z[i] + 0.5 * h * dz1
         dx2 = -y2 - z2
-        dy2 = x2 + a * y2 + k * (y_m - y2)
+        dy_base2 = x2 + a * y2
         dz2 = b + z2 * (x2 - c)
+        dy_s2 = dy_base2
+        u2 = KP * (y_m - y2) + KD * (dy_m - dy_s2)
+        dy2 = dy_base2 + u2
+
         # k3
         x3 = x[i] + 0.5 * h * dx2
         y3 = y[i] + 0.5 * h * dy2
         z3 = z[i] + 0.5 * h * dz2
         dx3 = -y3 - z3
-        dy3 = x3 + a * y3 + k * (y_m - y3)
+        dy_base3 = x3 + a * y3
         dz3 = b + z3 * (x3 - c)
-        # k4 (mismo y_m para cero‑orden)
+        dy_s3 = dy_base3
+        u3 = KP * (y_m - y3) + KD * (dy_m - dy_s3)
+        dy3 = dy_base3 + u3
+
+        # k4 (puedes usar y_m y dy_m constantes; cero-orden)
         x4 = x[i] + h * dx3
         y4 = y[i] + h * dy3
         z4 = z[i] + h * dz3
         dx4 = -y4 - z4
-        dy4 = x4 + a * y4 + k * (y_m - y4)
+        dy_base4 = x4 + a * y4
         dz4 = b + z4 * (x4 - c)
+        dy_s4 = dy_base4
+        u4 = KP * (y_m - y4) + KD * (dy_m - dy_s4)
+        dy4 = dy_base4 + u4
 
         x[i+1] = x[i] + (h/6.0) * (dx1 + 2*dx2 + 2*dx3 + dx4)
         y[i+1] = y[i] + (h/6.0) * (dy1 + 2*dy2 + 2*dy3 + dy4)
@@ -587,13 +599,21 @@ def main():
         ancho,
         alto
     ) = extraer_parametros(RECEIVED_KEYS, RECEIVED_DATA)
+    dy_maestro = np.gradient(y_maestro, H)
 
     # ========== PROCESO DE SINCRONIZACIÓN ==========
     print("[SINCRONIZACIÓN] Sincronizando sistema esclavo...")
     t_inicio_sincronizacion = time.perf_counter()
-    x_esclavo, y_esclavo, z_esclavo, t_slave, x_sinc = sincronizacion(
-    y_maestro, times, ROSSLER_PARAMS, time_sinc, keystream, nmax
-    )
+    t_slave, x_slave, y_slave, z_slave = integrar_slave_pd(
+    y_maestro=y_maestro,
+    dy_maestro=dy_maestro,
+    h=H,
+    a=ROSSLER_PARAMS['a'],
+    b=ROSSLER_PARAMS['b'],
+    c=ROSSLER_PARAMS['c'],
+    k=0.0,      # si usas k como acoplamiento adicional; puedes dejar K=0 si sólo quieres el PD
+    x0=X0
+)
     t_fin_sincronizacion = time.perf_counter()
 
     print("[SINCRONIZACIÓN] Proceso de sincronización completado.")
