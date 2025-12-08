@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import paho.mqtt.client as mqtt
 from PIL import Image
 
-
+np.seterr(invalid="raise")
 
 # ========== CONFIGURACION MQTT ==========
 BROKER = "raspberrypiJED.local"
@@ -56,21 +56,28 @@ RUTA_DISPERSION_PIXELES = CARPETA_RESULTADOS / "dispersion_pixeles.png"
 #RUTAS DE CSV
 RUTA_ERRORES = CARPETA_RESULTADOS / "errores_sincronizacion.csv"
 # RUTAS DE IMAGENES E HISTOGRAMAS
-RUTA_IMAGEN_ORIGINAL = Path("Prueba.jpg")
+RUTA_IMAGEN_ORIGINAL = Path("Prueba2.jpg")
 RUTA_HISTOGRAMA_IMAGENES = CARPETA_RESULTADOS / "histogramas.png"
 RUTA_IMAGEN_DESCIFRADA = CARPETA_RESULTADOS / "imagen_descifrada.png"
 RUTA_TIMINGS = CARPETA_RESULTADOS / "tiempo_procesos_esclavo.csv"
 
 # RUTAS PARA DISTANCIA HAMMING
-CARPETA_RESULTADOS_HAMMING = Path("Hamming_Resultados")
-RUTA_DISTANCIA_HAMMING_A = CARPETA_RESULTADOS_HAMMING / "hamming_vs_a.png"
-RUTA_DISTANCIA_HAMMING_CSV_A = CARPETA_RESULTADOS_HAMMING / "hamming_vs_a.csv"
-RUTA_DISTANCIA_HAMMING_B = CARPETA_RESULTADOS_HAMMING / "hamming_vs_b.png"
-RUTA_DISTANCIA_HAMMING_CSV_B = CARPETA_RESULTADOS_HAMMING / "hamming_vs_b.csv"
-RUTA_DISTANCIA_HAMMING_C = CARPETA_RESULTADOS_HAMMING / "hamming_vs_c.png"
-RUTA_DISTANCIA_HAMMING_CSV_C = CARPETA_RESULTADOS_HAMMING / "hamming_vs_c.csv"
+RUTA_DISTANCIA_HAMMING_A = CARPETA_RESULTADOS / "hamming_vs_a.png"
+RUTA_DISTANCIA_HAMMING_CSV_A = CARPETA_RESULTADOS / "hamming_vs_a.csv"
+RUTA_DISTANCIA_HAMMING_B = CARPETA_RESULTADOS / "hamming_vs_b.png"
+RUTA_DISTANCIA_HAMMING_CSV_B = CARPETA_RESULTADOS / "hamming_vs_b.csv"
+RUTA_DISTANCIA_HAMMING_C = CARPETA_RESULTADOS / "hamming_vs_c.png"
+RUTA_DISTANCIA_HAMMING_CSV_C = CARPETA_RESULTADOS / "hamming_vs_c.csv"
 
-
+"""
+A eliminar después
+"""
+    
+def check_finite_verbose(name, arr):
+    if not np.isfinite(arr).all():
+        idx = np.where(~np.isfinite(arr))[0]
+        raise ValueError(f"{name} tiene {len(idx)} NaN/inf; primeros idx: {idx[:10]}")
+    
 def on_connect(client, userdata, flags, rc):
     print(f"[MQTT-ESCLAVO] Conectado al broker {BROKER}: {PORT} con TLS (rc={rc})")
     if rc == 0:
@@ -100,34 +107,47 @@ def rossler_slave(state, y_m, a, b, c, k):
 
 def integrar_slave(y_maestro, h, a, b, c, k, x0):
     n = len(y_maestro)
-    t = np.linspace(0, (n - 1) * h, n)
+    t = np.linspace(0, (n - 1) * h, n, dtype=np.float64)
 
-    x = np.zeros(n)
-    y = np.zeros(n)
-    z = np.zeros(n)
+    x = np.empty(n, dtype=np.float64)
+    y = np.empty(n, dtype=np.float64)
+    z = np.empty(n, dtype=np.float64)
     x[0], y[0], z[0] = x0
 
-    def f(state, y_m):
-        x_s, y_s, z_s = state
-        dxdt = -y_s - z_s
-        dydt = x_s + a * y_s + k * (y_m - y_s)
-        dzdt = b + z_s * (x_s - c)
-        return np.array([dxdt, dydt, dzdt], dtype=float)
-
     for i in range(n - 1):
-        state = np.array([x[i], y[i], z[i]], dtype=float)
         y_m = y_maestro[i]
-        y_m_next = y_maestro[i + 1] if i + 1 < n else y_maestro[i]
+        # k1
+        dx1 = -y[i] - z[i]
+        dy1 = x[i] + a * y[i] + k * (y_m - y[i])
+        dz1 = b + z[i] * (x[i] - c)
+        # k2
+        x2 = x[i] + 0.5 * h * dx1
+        y2 = y[i] + 0.5 * h * dy1
+        z2 = z[i] + 0.5 * h * dz1
+        dx2 = -y2 - z2
+        dy2 = x2 + a * y2 + k * (y_m - y2)
+        dz2 = b + z2 * (x2 - c)
+        # k3
+        x3 = x[i] + 0.5 * h * dx2
+        y3 = y[i] + 0.5 * h * dy2
+        z3 = z[i] + 0.5 * h * dz2
+        dx3 = -y3 - z3
+        dy3 = x3 + a * y3 + k * (y_m - y3)
+        dz3 = b + z3 * (x3 - c)
+        # k4 (mismo y_m para cero‑orden)
+        x4 = x[i] + h * dx3
+        y4 = y[i] + h * dy3
+        z4 = z[i] + h * dz3
+        dx4 = -y4 - z4
+        dy4 = x4 + a * y4 + k * (y_m - y4)
+        dz4 = b + z4 * (x4 - c)
 
-        k1 = f(state, y_m)
-        k2 = f(state + 0.5 * h * k1, y_m)
-        k3 = f(state + 0.5 * h * k2, y_m)
-        k4 = f(state + h * k3, y_m_next)
-
-        state_next = state + (h / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-        x[i + 1], y[i + 1], z[i + 1] = state_next
+        x[i+1] = x[i] + (h/6.0) * (dx1 + 2*dx2 + 2*dx3 + dx4)
+        y[i+1] = y[i] + (h/6.0) * (dy1 + 2*dy2 + 2*dy3 + dy4)
+        z[i+1] = z[i] + (h/6.0) * (dz1 + 2*dz2 + 2*dz3 + dz4)
 
     return t, x, y, z
+
 
 # ========== FUNCION DEL MAPA LOGISTICO ==========
 def mapa_logistico(LOGISTIC_PARAMS, nmax):
@@ -162,8 +182,16 @@ def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
         x0=X0
     )
 
+    check_finite_verbose("x_slave", x_slave)
+    check_finite_verbose("y_slave", y_slave)
+    check_finite_verbose("z_slave", z_slave)
+    if time_sinc + keystream > len(x_slave):
+        raise ValueError("x_slave más corto que time_sinc+keystream")
+
     x_sinc = x_slave[time_sinc:time_sinc + keystream]
+    check_finite_verbose("x_sinc_slice", x_sinc)
     x_sinc = np.resize(x_sinc, nmax)
+    check_finite_verbose("x_sinc_resized", x_sinc)
 
     return x_slave, y_slave, z_slave, t_slave, x_sinc
 
@@ -171,11 +199,16 @@ def revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax):
 
     difusion = vector_cifrado - vector_logistico - x_sinc
 
+    if difusion.shape[0] != nmax:
+        raise ValueError(f"difusion y nmax no coinciden: {difusion.shape[0]} vs {nmax}")
+    check_finite_verbose("difusion", difusion)
+
     return difusion
 
 def revertir_difusion(difusion, vector_logistico, nmax, ancho, alto):
     # 1. Regenerar vector de mezcla (mismo que el maestro)
     vector_mezcla = np.floor(vector_logistico * nmax).astype(int)
+    vector_mezcla = np.clip(vector_mezcla, 0, nmax - 1)
 
     # 2. Inicializar estructuras para revertir
     vector_temp = np.full(nmax, 260.0)
@@ -183,11 +216,20 @@ def revertir_difusion(difusion, vector_logistico, nmax, ancho, alto):
     contador = 0
 
     # 3. Primera pasada: asignar a posiciones originales
+    # for i in range(nmax):
+    #     pos = vector_mezcla[i]
+    #     if vector_temp[pos] == 260.0:
+    #         vector_temp[pos] = difusion[contador]
+    #         contador += 1
+
+    # 3.1
     for i in range(nmax):
         pos = vector_mezcla[i]
         if vector_temp[pos] == 260.0:
             vector_temp[pos] = difusion[contador]
             contador += 1
+            if contador >= nmax:
+                break
 
     # 4. Segunda apsada: asignar posiciones restantes en orden
     for j in range(nmax):
@@ -197,6 +239,12 @@ def revertir_difusion(difusion, vector_logistico, nmax, ancho, alto):
             vector_temp[j] = difusion[contador]
             contador += 1
 
+    if contador != nmax:
+        raise ValueError(f"No se llenaron todos los píxeles: contador={contador}, nmax={nmax}")
+
+    check_finite_verbose("vector_temp_pre_cast", vector_temp)
+    check_finite_verbose("vector_temp_times_255", vector_temp * 255)
+    
     # 5. Reconstruir la imagen
     img_array = (vector_temp * 255).reshape(alto, ancho, 3).astype(np.uint8)
     return Image.fromarray(img_array)
@@ -429,6 +477,88 @@ def graficar_dispersion_pixeles(muestreo = 10000):
     plt.tight_layout()
     plt.savefig(RUTA_DISPERSION_PIXELES, dpi=300)
 
+def distancia_hamming(imagen_original, imagen_descifrada):
+    img_original = np.array(imagen_original.convert("L"), dtype=np.uint8)
+    img_descifrada = np.array(imagen_descifrada.convert("L"), dtype=np.uint8)
+    
+    img_original = img_original.flatten()
+    img_descifrada = img_descifrada.flatten()
+    
+    n_bytes = min(img_original.size, img_descifrada.size)
+    img_original = img_original[:n_bytes]
+    img_descifrada = img_descifrada[:n_bytes]
+    
+    img_original = np.unpackbits(img_original)
+    img_descifrada = np.unpackbits(img_descifrada)
+    
+    n_bits = min(img_original.size, img_descifrada.size)
+    img_original = img_original[:n_bits]
+    img_descifrada = img_descifrada[:n_bits]
+    
+    diff_bits = img_original ^ img_descifrada
+    hamming_abs = int(diff_bits.sum())
+    hamming_norm = hamming_abs / n_bits if n_bits > 0 else 0.0
+    
+    print(f"[HAMMING] Distancia de Hamming absoluta: {hamming_abs}")
+    print(f"[HAMMING] Distancia de Hamming normalizada: {hamming_norm:.6f}")
+    
+    return hamming_abs, hamming_norm
+
+def experimento_hamming_vs_a(
+    ROSSLER_PARAMS,
+    LOGISTIC_PARAMS,
+    y_sinc,
+    times,
+    time_sinc,
+    nmax,
+    keystream,
+    vector_cifrado,
+    ancho,
+    alto,
+    vector_logistico
+):
+    img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
+    valores_a = np.arange(0.0, 1.0 + 1e-6, 0.02)
+    resultados = []
+    
+    print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'a' de Rössler...")
+    
+    for a_val in valores_a:
+        print(f"[HAMMING] Evaluando a = {a_val:.2f}...")
+        params_test = dict(ROSSLER_PARAMS)
+        params_test['a'] = float(a_val)
+        
+        # Sincronizar con el nuevo a
+        _, _, y_slave, t_slave, x_sinc = sincronizacion(
+            y_sinc, times, params_test, time_sinc, keystream, nmax
+        )
+        # Descifrar
+        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
+
+        # Calcular la distancia hamming
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+        resultados.append({
+            "a": a_val,
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+        
+        df_resultados = pd.DataFrame(resultados)
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_A, index=False)
+        print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_A}")
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_resultados['a'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
+        plt.xlabel("a")
+        plt.ylabel("Distancia de Hamming")
+        plt.title("Distancia de hamming imagen original vs descifrada")
+        plt.grid(True, alpha = 0.3)
+        plt.tight_layout()
+        plt.savefig(RUTA_DISTANCIA_HAMMING_A, dpi=300)
+        plt.close()
+        print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_A}")
+
 def guardar_errores_csv(t_slave, error_x, error_y, error_z):
     df_error = pd.DataFrame({
         'Tiempo': t_slave,
@@ -493,6 +623,11 @@ def main():
         alto
     ) = extraer_parametros(RECEIVED_KEYS, RECEIVED_DATA)
 
+    check_finite_verbose("x_maestro", x_maestro)
+    check_finite_verbose("y_maestro", y_maestro)
+    check_finite_verbose("z_maestro", z_maestro)
+    check_finite_verbose("vector_cifrado", vector_cifrado)
+
     # ========== PROCESO DE SINCRONIZACIÓN ==========
     print("[SINCRONIZACIÓN] Sincronizando sistema esclavo...")
     t_inicio_sincronizacion = time.perf_counter()
@@ -526,14 +661,37 @@ def main():
     imagen_descifrada.save(RUTA_IMAGEN_DESCIFRADA)
     print(f"[DESCIFRADO] Imagen descifrada guardada en {RUTA_IMAGEN_DESCIFRADA}")
     # ========== GUARDADO DE RESULTADOS ==========
-    error_x = np.abs(x_maestro[:len(x_esclavo)] - x_esclavo[:len(x_maestro)])
-    error_y = np.abs(y_maestro[:len(y_esclavo)] - y_esclavo[:len(y_maestro)])
-    error_z = np.abs(z_maestro[:len(z_esclavo)] - z_esclavo[:len(z_maestro)])
-    grafica_serie_temporal(times[:len(y_esclavo)], x_maestro[:len(x_esclavo)], y_maestro[:len(y_esclavo)], z_maestro[:len(z_esclavo)], t_slave, x_esclavo, y_esclavo, z_esclavo)
-    graficar_error_dispersion(times[:len(y_esclavo)], x_maestro[:len(x_esclavo)], y_maestro[:len(y_esclavo)], z_maestro[:len(z_esclavo)], t_slave, x_esclavo, y_esclavo, z_esclavo, error_x, error_y, error_z)
+    n_sync = min(len(times), len(x_maestro), len(y_maestro), len(z_maestro),
+                 len(t_slave), len(x_esclavo), len(y_esclavo), len(z_esclavo))
+    error_x = np.abs(x_maestro[:n_sync] - x_esclavo[:n_sync])
+    error_y = np.abs(y_maestro[:n_sync] - y_esclavo[:n_sync])
+    error_z = np.abs(z_maestro[:n_sync] - z_esclavo[:n_sync])
+
+    grafica_serie_temporal(
+        times[:n_sync], x_maestro[:n_sync], y_maestro[:n_sync], z_maestro[:n_sync],
+        t_slave[:n_sync], x_esclavo[:n_sync], y_esclavo[:n_sync], z_esclavo[:n_sync]
+    )
+    graficar_error_dispersion(
+        times[:n_sync], x_maestro[:n_sync], y_maestro[:n_sync], z_maestro[:n_sync],
+        t_slave[:n_sync], x_esclavo[:n_sync], y_esclavo[:n_sync], z_esclavo[:n_sync],
+        error_x, error_y, error_z
+    )
     graficar_histogramas()
     graficar_dispersion_pixeles()
     guardar_errores_csv(t_slave, error_x, error_y, error_z)
+    experimento_hamming_vs_a(
+        ROSSLER_PARAMS,
+        LOGISTIC_PARAMS,
+        y_maestro,
+        times,
+        time_sinc,
+        nmax,
+        keystream,
+        vector_cifrado,
+        ancho,
+        alto,
+        vector_logistico
+    )
 
     # ========== REGISTRO DE TIEMPOS ==========
     tiempo_mqtt = t_fin_mqtt - t_inicio_mqtt
