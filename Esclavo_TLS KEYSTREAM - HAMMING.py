@@ -36,7 +36,7 @@ X0 = [1.0, 1.0, 1.0]
 CARPETA_RESULTADOS = Path("Resultados_TLS_KEYSTREAM")
 CARPETA_RESULTADOS_HAMMING = Path("Hamming_Resultados")
 
-RUTA_IMAGEN_ORIGINAL = Path("Prueba.jpg")
+RUTA_IMAGEN_ORIGINAL = Path("Prueba2.jpg")
 RUTA_TIMINGS = CARPETA_RESULTADOS / "tiempo_procesos_esclavo.csv"
 RUTA_HISTOGRAMA_IMAGENES = CARPETA_RESULTADOS / "histogramas.png"
 RUTA_IMAGEN_DESCIFRADA = CARPETA_RESULTADOS / "imagen_descifrada.png"
@@ -102,7 +102,7 @@ def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
     y_master_interp = interp1d(
         times,
         y_sinc,
-        kind='cubic',
+        kind='nearest',
         fill_value="extrapolate"
     )    
 
@@ -116,8 +116,8 @@ def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
                 ROSSLER_PARAMS['b'], 
                 ROSSLER_PARAMS['c'], 
                 K),
-        rtol = 1e-8,
-        atol = 1e-8,
+        rtol = 1e-5,
+        atol = 1e-5,
         method='RK45'
     )
     
@@ -157,8 +157,11 @@ def revertir_difusion(difusion, vector_logistico, nmax, ancho, alto):
             contador += 1
 
     # 5. Reconstruir la imagen
+    vector_temp = np.clip(vector_temp, 0.0, 1.0)
     img_array = (vector_temp * 255).reshape(alto, ancho, 3).astype(np.uint8)
     return Image.fromarray(img_array)
+
+
 
 def extraer_parametros(receivedKeys, receivedData):
     # Llaves del maestro
@@ -516,19 +519,19 @@ def main():
     # ========== GUARDADO DE RESULTADOS ==========
     error_y = np.abs(y_sinc - y_slave)
     graficar_histogramas()
-    # experimento_hamming_vs_a(
-    #     ROSSLER_PARAMS,
-    #     LOGISTIC_PARAMS,
-    #     y_sinc,
-    #     times,
-    #     time_sinc,
-    #     nmax,
-    #     keystream,
-    #     vector_cifrado,
-    #     ancho,
-    #     alto,
-    #     vector_logistico
-    # )
+    experimento_hamming_vs_a(
+        ROSSLER_PARAMS,
+        LOGISTIC_PARAMS,
+        y_sinc,
+        times,
+        time_sinc,
+        nmax,
+        keystream,
+        vector_cifrado,
+        ancho,
+        alto,
+        vector_logistico
+    )
     # experimento_hamming_vs_b(
     #     ROSSLER_PARAMS,
     #     LOGISTIC_PARAMS,
