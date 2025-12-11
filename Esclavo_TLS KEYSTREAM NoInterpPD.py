@@ -3,6 +3,7 @@ import json
 import time 
 import ssl
 from pathlib import Path
+from scipy.ndimage import gaussian_filter1d
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -24,8 +25,9 @@ RECEIVED_KEYS = None
 RECEIVED_DATA = None
 
 # ========== PARAMETROS DE ROSSLER ==========
-H = 0.01
-KP = 0.5
+H = 0.005
+K = 2.0
+KP = 2.0
 KD = 0.01
 X0 = [1.0, 1.0, 1.0]
 
@@ -147,6 +149,7 @@ def integrar_slave_pd(y_maestro, dy_maestro, h, a, b, c, k, x0):
         y[i+1] = y[i] + (h/6.0) * (dy1 + 2*dy2 + 2*dy3 + dy4)
         z[i+1] = z[i] + (h/6.0) * (dz1 + 2*dz2 + 2*dz3 + dz4)
 
+    
     return t, x, y, z
 
 
@@ -167,14 +170,16 @@ def mapa_logistico(LOGISTIC_PARAMS, nmax):
 # ========== FUNCION PARA REVERTIR LA CONFUSIÓN ==========
 def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
     iteraciones = time_sinc + keystream
-
     if len(y_sinc) < iteraciones:
         raise ValueError("La señal y_sinc recibida es más corta que el número de iteraciones esperado.")
 
     y_maestro = y_sinc[:iteraciones]
+    dy_maestro = np.gradient(y_maestro, H)
+    dy_maestro = gaussian_filter1d(dy_maestro, sigma=1.5)
 
-    t_slave, x_slave, y_slave, z_slave = integrar_slave(
+    t_slave, x_slave, y_slave, z_slave = integrar_slave_pd(
         y_maestro=y_maestro,
+        dy_maestro=dy_maestro,
         h=H,
         a=ROSSLER_PARAMS['a'],
         b=ROSSLER_PARAMS['b'],
@@ -186,7 +191,7 @@ def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
     if time_sinc + keystream > len(x_slave):
         raise ValueError("x_slave más corto que time_sinc+keystream")
 
-    x_sinc = x_slave[time_sinc:time_sinc + keystream]
+    x_sinc = x_slave[time_sinc: time_sinc + keystream]
     x_sinc = np.resize(x_sinc, nmax)
 
     return x_slave, y_slave, z_slave, t_slave, x_sinc
@@ -599,21 +604,13 @@ def main():
         ancho,
         alto
     ) = extraer_parametros(RECEIVED_KEYS, RECEIVED_DATA)
-    dy_maestro = np.gradient(y_maestro, H)
 
     # ========== PROCESO DE SINCRONIZACIÓN ==========
     print("[SINCRONIZACIÓN] Sincronizando sistema esclavo...")
     t_inicio_sincronizacion = time.perf_counter()
-    t_slave, x_slave, y_slave, z_slave = integrar_slave_pd(
-    y_maestro=y_maestro,
-    dy_maestro=dy_maestro,
-    h=H,
-    a=ROSSLER_PARAMS['a'],
-    b=ROSSLER_PARAMS['b'],
-    c=ROSSLER_PARAMS['c'],
-    k=0.0,      # si usas k como acoplamiento adicional; puedes dejar K=0 si sólo quieres el PD
-    x0=X0
-)
+    x_esclavo, y_esclavo, z_esclavo, t_slave, x_sinc = sincronizacion(
+    y_maestro, times, ROSSLER_PARAMS, time_sinc, keystream, nmax
+    )
     t_fin_sincronizacion = time.perf_counter()
 
     print("[SINCRONIZACIÓN] Proceso de sincronización completado.")
@@ -659,19 +656,19 @@ def main():
     graficar_histogramas()
     graficar_dispersion_pixeles()
     guardar_errores_csv(t_slave, error_x, error_y, error_z)
-    experimento_hamming_vs_a(
-        ROSSLER_PARAMS,
-        LOGISTIC_PARAMS,
-        y_maestro,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
-        ancho,
-        alto,
-        vector_logistico
-    )
+    # experimento_hamming_vs_a(
+    #     ROSSLER_PARAMS,
+    #     LOGISTIC_PARAMS,
+    #     y_maestro,
+    #     times,
+    #     time_sinc,
+    #     nmax,
+    #     keystream,
+    #     vector_cifrado,
+    #     ancho,
+    #     alto,
+    #     vector_logistico
+    # )
 
     # ========== REGISTRO DE TIEMPOS ==========
     tiempo_mqtt = t_fin_mqtt - t_inicio_mqtt

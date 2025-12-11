@@ -524,6 +524,116 @@ def experimento_hamming_vs_a(
         plt.close()
         print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_A}")
 
+def experimento_hamming_vs_b(
+    ROSSLER_PARAMS,
+    LOGISTIC_PARAMS,
+    y_sinc,
+    times,
+    time_sinc,
+    nmax,
+    keystream,
+    vector_cifrado,
+    ancho,
+    alto,
+    vector_logistico
+):
+    img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
+    valores_b = np.arange(0.0, 1.0 + 1e-6, 0.02)
+    resultados = []
+    
+    print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'b' de Rössler...")
+    
+    for b_val in valores_b:
+        print(f"[HAMMING] Evaluando b = {b_val:.2f}...")
+        params_test = dict(ROSSLER_PARAMS)
+        params_test['b'] = float(b_val)
+        
+        # Sincronizar con el nuevo b
+        _, _, y_slave, t_slave, x_sinc = sincronizacion(
+            y_sinc, times, params_test, time_sinc, keystream, nmax
+        )
+        # Descifrar
+        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
+
+        # Calcular la distancia hamming
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+        resultados.append({
+            "b": b_val,
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+        
+        df_resultados = pd.DataFrame(resultados)
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_B, index=False)
+        print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_B}")
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_resultados['b'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
+        plt.xlabel("b")
+        plt.ylabel("Distancia de Hamming")
+        plt.title("Distancia de hamming imagen original vs descifrada")
+        plt.grid(True, alpha = 0.3)
+        plt.tight_layout()
+        plt.savefig(RUTA_DISTANCIA_HAMMING_B, dpi=300)
+        plt.close()
+        print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_B}")
+
+def experimento_hamming_vs_c(
+    ROSSLER_PARAMS,
+    LOGISTIC_PARAMS,
+    y_sinc,
+    times,
+    time_sinc,
+    nmax,
+    keystream,
+    vector_cifrado,
+    ancho,
+    alto,
+    vector_logistico
+):
+    img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
+    valores_c = np.arange(5.0, 6.0 + 1e-6, 0.02)
+    resultados = []
+    
+    print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'c' de Rössler...")
+    
+    for c_val in valores_c:
+        print(f"[HAMMING] Evaluando c = {c_val:.2f}...")
+        params_test = dict(ROSSLER_PARAMS)
+        params_test['c'] = float(c_val)
+        
+        # Sincronizar con el nuevo c
+        _, _, y_slave, t_slave, x_sinc = sincronizacion(
+            y_sinc, times, params_test, time_sinc, keystream, nmax
+        )
+        # Descifrar
+        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
+
+        # Calcular la distancia hamming
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+        resultados.append({
+            "c": c_val,
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+        
+        df_resultados = pd.DataFrame(resultados)
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_C, index=False)
+        print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_C}")
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_resultados['c'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
+        plt.xlabel("c")
+        plt.ylabel("Distancia de Hamming")
+        plt.title("Distancia de hamming imagen original vs descifrada")
+        plt.grid(True, alpha = 0.3)
+        plt.tight_layout()
+        plt.savefig(RUTA_DISTANCIA_HAMMING_C, dpi=300)
+        plt.close()
+        print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_C}")
+
 def guardar_errores_csv(t_slave, error_x, error_y, error_z):
     df_error = pd.DataFrame({
         'Tiempo': t_slave,
@@ -640,6 +750,32 @@ def main():
     graficar_dispersion_pixeles()
     guardar_errores_csv(t_slave, error_x, error_y, error_z)
     experimento_hamming_vs_a(
+        ROSSLER_PARAMS,
+        LOGISTIC_PARAMS,
+        y_maestro,
+        times,
+        time_sinc,
+        nmax,
+        keystream,
+        vector_cifrado,
+        ancho,
+        alto,
+        vector_logistico
+    )
+    experimento_hamming_vs_b(
+        ROSSLER_PARAMS,
+        LOGISTIC_PARAMS,
+        y_maestro,
+        times,
+        time_sinc,
+        nmax,
+        keystream,
+        vector_cifrado,
+        ancho,
+        alto,
+        vector_logistico
+    )
+    experimento_hamming_vs_c(
         ROSSLER_PARAMS,
         LOGISTIC_PARAMS,
         y_maestro,

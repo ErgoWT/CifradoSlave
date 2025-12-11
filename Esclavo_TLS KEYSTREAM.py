@@ -31,27 +31,39 @@ RECEIVED_DATA = None
 H = 0.01
 K = 1.0
 X0 = [1.0, 1.0, 1.0]
+# Parámetros característicos de prueba, estos son distintos a los del maestro
+A = 0.3
+B = 0.201
+C = 6.2
+ALOG = 3.9899
+X0_LOG = 0.4000001
 
 # ========== RUTAS Y ARCHIVOS ==========
 CARPETA_RESULTADOS = Path("Resultados_TLS_KEYSTREAM")
-RUTA_SINCRONIZACION_Y1 = CARPETA_RESULTADOS / "sincronizacion_y_resultados.png"
-RUTA_SINCRONIZACION_Y2 = CARPETA_RESULTADOS / "sincronizacion_y_resultados2.png"
+RUTA_SINCRONIZACION_X = CARPETA_RESULTADOS / "sincronizacion_x_resultados.png"
+RUTA_SINCRONIZACION_Y = CARPETA_RESULTADOS / "sincronizacion_y_resultados.png"
+RUTA_SINCRONIZACION_Z = CARPETA_RESULTADOS / "sincronizacion_z_resultados.png"
 
+RUTA_ERROR_X_GRAFICA = CARPETA_RESULTADOS / "error_sincronizacion_x.png"
 RUTA_ERROR_Y_GRAFICA = CARPETA_RESULTADOS / "error_sincronizacion_y.png"
+RUTA_ERROR_Z_GRAFICA = CARPETA_RESULTADOS / "error_sincronizacion_z.png"
+
+RUTA_DISPERSION_X = CARPETA_RESULTADOS / "dispersion_error_x.png"
 RUTA_DISPERSION_Y = CARPETA_RESULTADOS / "dispersion_error_y.png"
+RUTA_DISPERSION_Z = CARPETA_RESULTADOS / "dispersion_error_z.png"
 RUTA_DISPERSION_PIXELES = CARPETA_RESULTADOS / "dispersion_pixeles.png"
 
-RUTA_ERROR_Y = CARPETA_RESULTADOS / "error_sincronizacion_Y.csv"
-RUTA_SERIETEMPORAL_Y = CARPETA_RESULTADOS / "serie_temporal_y.csv"
+RUTA_ERRORES = CARPETA_RESULTADOS / "errores_sincronizacion.csv"
 
-RUTA_IMAGEN_ORIGINAL = Path("Prueba.jpg")
+RUTA_IMAGEN_ORIGINAL = Path("Prueba2.jpg")
 RUTA_HISTOGRAMA_IMAGENES = CARPETA_RESULTADOS / "histogramas.png"
 
 RUTA_IMAGEN_DESCIFRADA = CARPETA_RESULTADOS / "imagen_descifrada.png"
 RUTA_TIMINGS = CARPETA_RESULTADOS / "tiempo_procesos_esclavo.csv"
 
+RUTA_CORRELACION_BASE = CARPETA_RESULTADOS / "correlacion_original_vs_descifrada.csv"
 
-
+PUNTOS_EVAL = 40000
 
 def on_connect(client, userdata, flags, rc):
     print(f"[MQTT-ESCLAVO] Conectado al broker {BROKER}: {PORT} con TLS (rc={rc})")
@@ -85,7 +97,7 @@ def rossler_esclavo(t, state, y_master_interp, a, b, c, k):
 def mapa_logistico(LOGISTIC_PARAMS, nmax):
 
     a_log = LOGISTIC_PARAMS['aLog']
-    x0_log = LOGISTIC_PARAMS['x0_log']
+    x0_log = X0_LOG
 
     vector_logistico = np.zeros(nmax)
     x = x0_log
@@ -96,40 +108,42 @@ def mapa_logistico(LOGISTIC_PARAMS, nmax):
     return vector_logistico
 
 # ========== FUNCION PARA REVERTIR LA CONFUSIÓN ==========
-def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
+def sincronizacion(y_maestro, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
 
     iteraciones = time_sinc + keystream
     t_span = (0, iteraciones*H)
     t_eval = np.linspace(0, iteraciones*H, iteraciones)
 
-    y_master_interp = interp1d(
+    y_maestro_interp = interp1d(
         times,
-        y_sinc,
+        y_maestro,
         kind='cubic',
         fill_value="extrapolate"
     )    
 
-    b_error = 0.3
     
-    sol_slave = solve_ivp(
+    sol_esclavo = solve_ivp(
         fun = rossler_esclavo,
         t_span = t_span,
         y0 = X0,
         t_eval = t_eval,
-        args = (y_sinc, 
+        args = (y_maestro_interp, 
                 ROSSLER_PARAMS['a'], 
                 ROSSLER_PARAMS['b'], 
                 ROSSLER_PARAMS['c'], 
                 K),
-        rtol = 1e-4,
-        atol = 1e-4,
+        rtol = 1e-5,
+        atol = 1e-5,
         method='RK45'
     )
     
-    y_slave = sol_slave.y[1]
-    x_sinc = sol_slave.y[0][time_sinc:time_sinc + keystream]
+    x_esclavo = sol_esclavo.y[0]
+    y_esclavo = sol_esclavo.y[1]
+    z_esclavo = sol_esclavo.y[2]
+    t_esclavo = sol_esclavo.t
+    x_sinc = sol_esclavo.y[0][time_sinc:iteraciones]
     x_sinc = np.resize(x_sinc, nmax)
-    return y_master_interp, t_eval, y_slave, sol_slave.t, x_sinc
+    return t_eval, x_esclavo, y_esclavo, z_esclavo, t_esclavo, x_sinc
 
 def revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax):
 
@@ -170,32 +184,50 @@ def extraer_parametros(receivedKeys, receivedData):
     ROSSLER_PARAMS = receivedKeys['ROSSLER_PARAMS']
     LOGISTIC_PARAMS = receivedKeys['LOGISTIC_PARAMS']
 
-    y_sinc = np.array(receivedData['y_sinc'])
-    times = np.array(receivedData['times'])
-
-    time_sinc = int(receivedData['time_sinc'])
-    nmax = int(receivedData['nmax'])
-    keystream = int(receivedData['KEYSTREAM'])
-
     vector_cifrado = np.array(receivedData['vector_cifrado'])
+    x_maestro = np.array(receivedData['x_maestro'])
+    y_maestro = np.array(receivedData['y_maestro'])
+    z_maestro = np.array(receivedData['z_maestro'])
+    times = np.array(receivedData['times'])
     ancho = int(receivedData['ancho'])
     alto = int(receivedData['alto'])
+    nmax = int(receivedData['nmax'])
+    time_sinc = int(receivedData['time_sinc'])
+    keystream = int(receivedData['KEYSTREAM'])
 
     return (
         ROSSLER_PARAMS,
         LOGISTIC_PARAMS,
-        y_sinc,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
         vector_cifrado,
+        x_maestro,
+        y_maestro,
+        z_maestro,
+        times,
         ancho,
-        alto
+        alto,
+        nmax,
+        time_sinc,
+        keystream
     )
     
 
-def grafica_serie_temporal(times, y_maestro, t_esclavo, y_esclavo):
+def grafica_serie_temporal(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo):
+    # Series temporales en X
+    plt.figure(figsize=(10, 6))
+    plt.plot(times, x_maestro, label='Maestro x(t)', linewidth = 1.4, color='red') # Señal del maestro
+    plt.plot(t_esclavo, x_esclavo, label='Esclavo x(t)', linewidth = 1.4, linestyle='--', alpha=0.9)
+    plt.xlabel("Tiempo (s)")
+    plt.ylabel("x(t)")
+    plt.title("Serie Temporal de x(t): Maestro vs Esclavo")
+    plt.legend(loc="upper right", frameon=False)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(RUTA_SINCRONIZACION_X, dpi=300)
+    
+    # Imprimir longitud total de times y t_esclavo
+    print(f"[GRAFICAS] Longitud times (maestro): {len(times)}, Longitud t_esclavo (esclavo): {len(t_esclavo)}")
+
+    # Series temporales en Y
     plt.figure(figsize=(10, 6))
     plt.plot(times, y_maestro, label='Maestro y(t)', linewidth = 1.4, color='red') # Señal del maestro
     plt.plot(t_esclavo, y_esclavo, label='Esclavo y(t)', linewidth = 1.4, linestyle='--', alpha=0.9)
@@ -205,41 +237,35 @@ def grafica_serie_temporal(times, y_maestro, t_esclavo, y_esclavo):
     plt.legend(loc="upper right", frameon=False)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(RUTA_SINCRONIZACION_Y1, dpi=300)
+    plt.savefig(RUTA_SINCRONIZACION_Y, dpi=300)
 
-    # Gráfica primeros datos
-    n_maestro = max(1, int(0.15 * len(times)))
-    n_esclavo = max(1, int(0.15 * len(t_esclavo)))
-
-    times_25 = times[:n_maestro]
-    y_maestro_25 = y_maestro[:n_maestro]
-    t_esclavo_25 = t_esclavo[:n_esclavo]
-    y_esclavo_25 = y_esclavo[:n_esclavo]
-
+    # Series temporales en Z
     plt.figure(figsize=(10, 6))
-    plt.plot(times_25, y_maestro_25, label="Maestro  y(t)", linewidth=1.4)
-    plt.plot(t_esclavo_25, y_esclavo_25, label="Esclavo  y(t)", linewidth=1.4, linestyle="--", alpha=0.9)
-    plt.xlabel("Tiempo")
-    plt.ylabel("y(t)")
-    plt.title("Serie temporal de y(t) - Etapa de acoplamiento")
+    plt.plot(times, z_maestro, label='Maestro z(t)', linewidth = 1.4, color='red') # Señal del maestro
+    plt.plot(t_esclavo, z_esclavo, label='Esclavo z(t)', linewidth = 1.4, linestyle='--', alpha=0.9)
+    plt.xlabel("Tiempo (s)")
+    plt.ylabel("z(t)")
+    plt.title("Serie Temporal de z(t): Maestro vs Esclavo")
     plt.legend(loc="upper right", frameon=False)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(RUTA_SINCRONIZACION_Y2, dpi=300)
+    plt.savefig(RUTA_SINCRONIZACION_Z, dpi=300)
 
-def graficar_error_dispersion(times, y_maestro, t_esclavo, y_esclavo, error_y):
-    n_comun = min(len(times), len(t_esclavo))
-    if n_comun <= 0:
-        print("[GRAFICAS] No hay suficientes datos para graficar error y dispersión.")
-        return
+def graficar_errores_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo, error_x, error_y, error_z):
 
-    t_comun = times[:n_comun]
-    y_maestro_c = y_maestro[:n_comun]
-    y_esclavo_c = y_esclavo[:n_comun]
-
-    # ==================== GRÁFICA ERROR VS TIEMPO ====================
+    # ==================== GRÁFICA ERROR VS TIEMPO X ====================
     plt.figure(figsize=(10, 6))
-    plt.plot(t_comun, error_y, linewidth=1.4)
+    plt.plot(times, error_x, linewidth=1.4)
+    plt.xlabel("Tiempo")
+    plt.ylabel("|x_m(t) - x_s(t)|")
+    plt.title("Error en la serie x(t) entre maestro y esclavo")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(RUTA_ERROR_X_GRAFICA, dpi=300)
+    print(f"[GRAFICAS] Error |x_m - x_s| vs tiempo guardado en {RUTA_ERROR_X_GRAFICA}")
+    # ==================== GRÁFICA ERROR VS TIEMPO Y ====================
+    plt.figure(figsize=(10, 6))
+    plt.plot(times, error_y, linewidth=1.4)
     plt.xlabel("Tiempo")
     plt.ylabel("|y_m(t) - y_s(t)|")
     plt.title("Error en la serie y(t) entre maestro y esclavo")
@@ -247,12 +273,36 @@ def graficar_error_dispersion(times, y_maestro, t_esclavo, y_esclavo, error_y):
     plt.tight_layout()
     plt.savefig(RUTA_ERROR_Y_GRAFICA, dpi=300)
     print(f"[GRAFICAS] Error |y_m - y_s| vs tiempo guardado en {RUTA_ERROR_Y_GRAFICA}")
+    # ==================== GRÁFICA ERROR VS TIEMPO Z ====================
+    plt.figure(figsize=(10, 6))
+    # Aquí se gráfican los datos desde 2000 hasta 40000
+    plt.plot(times, error_z, linewidth=1.4)
+    plt.xlabel("Tiempo")
+    plt.ylabel("|z_m(t) - z_s(t)|")
+    plt.title("Error en la serie z(t) entre maestro y esclavo")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(RUTA_ERROR_Z_GRAFICA, dpi=300)
+    print(f"[GRAFICAS] Error |z_m - z_s| vs tiempo guardado en {RUTA_ERROR_Z_GRAFICA}")
 
+    
+    # ==================== DIAGRAMA DE DISPERSIÓN x_m vs x_s ====================
+    plt.figure(figsize=(10, 6))
+    plt.scatter(x_maestro, x_esclavo, s=8, alpha=0.6,)
+    min_val = min(x_maestro.min(), x_esclavo.min())
+    max_val = max(x_maestro.max(), x_esclavo.max())
+    plt.plot([min_val, max_val], [min_val, max_val], linewidth=1.0, linestyle="--")
+    plt.xlabel("x_m(t)  (maestro)")
+    plt.ylabel("x_s(t)  (esclavo)")
+    plt.title("Diagrama de dispersión x_maestro vs x_esclavo")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(RUTA_DISPERSION_X, dpi=300)
     # ==================== DIAGRAMA DE DISPERSIÓN y_m vs y_s ====================
     plt.figure(figsize=(10, 6))
-    plt.scatter(y_maestro_c, y_esclavo_c, s=8, alpha=0.6,)
-    min_val = min(y_maestro_c.min(), y_esclavo_c.min())
-    max_val = max(y_maestro_c.max(), y_esclavo_c.max())
+    plt.scatter(y_maestro, y_esclavo, s=8, alpha=0.6,)
+    min_val = min(y_maestro.min(), y_esclavo.min())
+    max_val = max(y_maestro.max(), y_esclavo.max())
     plt.plot([min_val, max_val], [min_val, max_val], linewidth=1.0, linestyle="--")
     plt.xlabel("y_m(t)  (maestro)")
     plt.ylabel("y_s(t)  (esclavo)")
@@ -260,6 +310,18 @@ def graficar_error_dispersion(times, y_maestro, t_esclavo, y_esclavo, error_y):
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(RUTA_DISPERSION_Y, dpi=300)
+    # ==================== DIAGRAMA DE DISPERSIÓN z_m vs z_s ====================
+    plt.figure(figsize=(10, 6))
+    plt.scatter(z_maestro, z_esclavo, s=8, alpha=0.6,)
+    min_val = min(z_maestro.min(), z_esclavo.min())
+    max_val = max(z_maestro.max(), z_esclavo.max())
+    plt.plot([min_val, max_val], [min_val, max_val], linewidth=1.0, linestyle="--")
+    plt.xlabel("z_m(t)  (maestro)")
+    plt.ylabel("z_s(t)  (esclavo)")
+    plt.title("Diagrama de dispersión z_maestro vs z_esclavo")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(RUTA_DISPERSION_Z, dpi=300)
 
 def graficar_histogramas():
     img_original = Image.open(RUTA_IMAGEN_ORIGINAL).convert("L")
@@ -268,17 +330,25 @@ def graficar_histogramas():
     pix_original = np.array(img_original).ravel()
     pix_descifrada = np.array(img_descifrada).ravel()
 
-    plt.figure(figsize=(10, 6))
     bins = np.arange(257)
-    plt.hist(pix_original, bins=bins, density=True, alpha=0.5, label="Imagen original")
-    plt.hist(pix_descifrada, bins=bins, density=True, alpha=0.5, label="Imagen descifrada")
-    plt.xlabel("Intensidad (0 - 255)")
-    plt.ylabel("Densidad de probabilidad")
-    plt.title("Histograma de intensidades: original vs descifrada (escala de grises)")
-    plt.legend(loc="upper right", frameon=False)
-    plt.grid(True, alpha=0.3)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharey=True)
+
+    axes[0].hist(pix_original, bins=bins, density=True, alpha=0.8, color="C0")
+    axes[0].set_title("Imagen original")
+    axes[0].set_xlabel("Intensidad (0 - 255)")
+    axes[0].set_ylabel("Densidad de probabilidad")
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].hist(pix_descifrada, bins=bins, density=True, alpha=0.8, color="C1")
+    axes[1].set_title("Imagen descifrada")
+    axes[1].set_xlabel("Intensidad (0 - 255)")
+    axes[1].grid(True, alpha=0.3)
+
+    fig.suptitle("Histogramas de intensidades: original vs descifrada (escala de grises)", y=1.02)
     plt.tight_layout()
     plt.savefig(RUTA_HISTOGRAMA_IMAGENES, dpi=300)
+    plt.close(fig)
 
 def graficar_dispersion_pixeles(muestreo = 10000):
     img_original = Image.open(RUTA_IMAGEN_ORIGINAL).convert("L")
@@ -310,22 +380,43 @@ def graficar_dispersion_pixeles(muestreo = 10000):
     plt.tight_layout()
     plt.savefig(RUTA_DISPERSION_PIXELES, dpi=300)
 
-def guardar_error_y_csv(t_slave, error_y):
+def coeficiente_correlacion_imagenes(imagen_original, imagen_descifrada):
+    """
+    Calcula el coeficiente de correlación de Pearson entre la imagen original
+    y la imagen descifrada (trabajando en escala de grises).
+    """
+    # Convertir a escala de grises y a float
+    img_orig = np.array(imagen_original.convert("L"), dtype=np.float64)
+    img_decr = np.array(imagen_descifrada.convert("L"), dtype=np.float64)
+
+    # Aplanar
+    orig_flat = img_orig.flatten()
+    decr_flat = img_decr.flatten()
+
+    # Emparejar longitudes
+    n = min(orig_flat.size, decr_flat.size)
+    orig_flat = orig_flat[:n]
+    decr_flat = decr_flat[:n]
+
+    # Evitar problemas de desviación estándar cero o muy pocos datos
+    if n < 2 or np.std(orig_flat) == 0 or np.std(decr_flat) == 0:
+        corr = 0.0
+    else:
+        corr_matrix = np.corrcoef(orig_flat, decr_flat)
+        corr = float(corr_matrix[0, 1])
+
+    print(f"[CORR] Coeficiente de correlación: {corr:.6f}")
+    return corr
+
+def guardar_errores(t_slave, error_x, error_y, error_z):
     df_error = pd.DataFrame({
         'Tiempo': t_slave,
-        'Error_y': error_y
+        'Error_x': error_x,
+        'Error_y': error_y,
+        'Error_z': error_z
     })
-    df_error.to_csv(RUTA_ERROR_Y, index=False)
-    print(f"[SINCRONIZACIÓN] Error de sincronización guardado en {RUTA_ERROR_Y}")
-
-
-def guardar_serietemporal_y(t_slave, y_slave):
-    df_y_slave = pd.DataFrame({
-        'Tiempo': t_slave,
-        'Y_esclavo': y_slave
-    })
-    df_y_slave.to_csv(RUTA_SERIETEMPORAL_Y, index=False)
-    print(f"[SINCRONIZACIÓN] Serie temporal Y esclavo guardada en {RUTA_SERIETEMPORAL_Y}")
+    df_error.to_csv(RUTA_ERRORES, index=False)
+    print(f"[SINCRONIZACIÓN] Error de sincronización guardado en {RUTA_ERRORES}")
 
 def tiempos_procesos(tiempo_mqtt, tiempo_sincronizacion, tiempo_descifrado, tiempo_total):
     df_tiempos = pd.DataFrame([{
@@ -338,6 +429,33 @@ def tiempos_procesos(tiempo_mqtt, tiempo_sincronizacion, tiempo_descifrado, tiem
     df_tiempos.to_csv(RUTA_TIMINGS, index=False, mode="a", header=not RUTA_TIMINGS.exists())
 
     print(f"[TIEMPOS] Tiempos de proceso guardados en {RUTA_TIMINGS}")
+
+def distancia_hamming(imagen_original, imagen_descifrada):
+    img_original = np.array(imagen_original.convert("L"), dtype=np.uint8)
+    img_descifrada = np.array(imagen_descifrada.convert("L"), dtype=np.uint8)
+    
+    img_original = img_original.flatten()
+    img_descifrada = img_descifrada.flatten()
+    
+    n_bytes = min(img_original.size, img_descifrada.size)
+    img_original = img_original[:n_bytes]
+    img_descifrada = img_descifrada[:n_bytes]
+    
+    img_original = np.unpackbits(img_original)
+    img_descifrada = np.unpackbits(img_descifrada)
+    
+    n_bits = min(img_original.size, img_descifrada.size)
+    img_original = img_original[:n_bits]
+    img_descifrada = img_descifrada[:n_bits]
+    
+    diff_bits = img_original ^ img_descifrada
+    hamming_abs = int(diff_bits.sum())
+    hamming_norm = hamming_abs / n_bits if n_bits > 0 else 0.0
+    
+    print(f"[HAMMING] Distancia de Hamming absoluta: {hamming_abs}")
+    print(f"[HAMMING] Distancia de Hamming normalizada: {hamming_norm:.6f}")
+    
+    return hamming_abs, hamming_norm
 
 def main():
     global RECEIVED_KEYS, RECEIVED_DATA
@@ -368,21 +486,25 @@ def main():
     (
         ROSSLER_PARAMS,
         LOGISTIC_PARAMS,
-        y_sinc,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
         vector_cifrado,
+        x_maestro,
+        y_maestro,
+        z_maestro,
+        times,
         ancho,
-        alto
+        alto,
+        nmax,
+        time_sinc,
+        keystream
     ) = extraer_parametros(RECEIVED_KEYS, RECEIVED_DATA)
+    # Imprimir longitud de todos los datos recibidos
+    print(f"[EXTRACCIÓN] Longitud vector_cifrado: {len(vector_cifrado)}, times: {len(times)}, nmax: {nmax}, ancho: {ancho}, alto: {alto}, time_sinc: {time_sinc}, keystream: {keystream}")
 
     # ========== PROCESO DE SINCRONIZACIÓN ==========
     print("[SINCRONIZACIÓN] Sincronizando sistema esclavo...")
     t_inicio_sincronizacion = time.perf_counter()
-    y_master_interp, t_eval, y_slave, t_slave, x_sinc = sincronizacion(
-        y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax
+    t_eval, x_esclavo, y_esclavo, z_esclavo, t_esclavo, x_sinc = sincronizacion(
+        y_maestro, times, ROSSLER_PARAMS, time_sinc, keystream, nmax
     )
     t_fin_sincronizacion = time.perf_counter()
 
@@ -411,15 +533,31 @@ def main():
     imagen_descifrada.save(RUTA_IMAGEN_DESCIFRADA)
     print(f"[DESCIFRADO] Imagen descifrada guardada en {RUTA_IMAGEN_DESCIFRADA}")
     # ========== GUARDADO DE RESULTADOS ==========
-    error_y = np.abs(y_sinc - y_slave)
-    grafica_serie_temporal(times, y_sinc, t_slave, y_slave)
-    graficar_error_dispersion(times, y_sinc, t_slave, y_slave, error_y)
+    error_x = np.abs(x_maestro - x_esclavo)
+    error_y = np.abs(y_maestro - y_esclavo)
+    error_z = np.abs(z_maestro - z_esclavo)
+    grafica_serie_temporal(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo)
+    graficar_errores_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo, error_x, error_y, error_z)
     graficar_histogramas()
     graficar_dispersion_pixeles()
+    guardar_errores(t_esclavo, error_x, error_y, error_z)
+    distancia_hamming(Image.open(RUTA_IMAGEN_ORIGINAL), imagen_descifrada)
 
-    guardar_serietemporal_y(t_slave, y_slave)
-    guardar_error_y_csv(t_slave, error_y)
+    img_original_base = Image.open(RUTA_IMAGEN_ORIGINAL)
+    coef_corr_base = coeficiente_correlacion_imagenes(img_original_base, imagen_descifrada)
 
+    # Guardar correlación en CSV
+    df_corr_base = pd.DataFrame([{
+        "descripcion": "correlacion_original_vs_descifrada",
+        "coef_corr": coef_corr_base
+    }])
+    df_corr_base.to_csv(
+        RUTA_CORRELACION_BASE,
+        index=False,
+        mode="a",
+        header=not RUTA_CORRELACION_BASE.exists()
+    )
+    print(f"[CORR] Correlación base guardada en {RUTA_CORRELACION_BASE}")
     # ========== REGISTRO DE TIEMPOS ==========
     tiempo_mqtt = t_fin_mqtt - t_inicio_mqtt
     tiempo_sincronizacion = t_fin_sincronizacion - t_inicio_sincronizacion

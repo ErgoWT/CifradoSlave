@@ -26,8 +26,8 @@ RECEIVED_DATA = None
 # Parametros del sistema
 H = 0.01
 KEYSTREAM = 10000
-KP = 2.0
-KD = 0.0
+KP = 0.5
+KD = 0.01
 X0 = [1.0, 1.0, 1.0]
 
 # Rutas de archivos
