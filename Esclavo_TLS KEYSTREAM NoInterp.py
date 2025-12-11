@@ -1,5 +1,4 @@
 """
-Docstring for Esclavo_TLS KEYSTREAM NoInterp
 Experimento para implementar un sistema de sincronización sin utilizar interpolación
 Se implementan todos los análisis y gráficas correspondientes
 El canal de comunicación es seguro mediante TLS
@@ -35,13 +34,21 @@ H = 0.01
 K = 2.0
 X0 = [1.0, 1.0, 1.0]
 
+# Parámetros característicos de prueba, estos son distintos a los del maestro
+A = 0.3
+B = 0.201
+C = 6.2
+ALOG = 3.9899
+X0_LOG = 0.4000001
+
 # ========== RUTAS Y ARCHIVOS ==========
 CARPETA_RESULTADOS = Path("No_Interpolar")
+CARPETA_HAMMING_LOGISTIC = CARPETA_RESULTADOS / "Hamming_Logistic"
+CARPETA_HAMMING_LOGISTIC.mkdir(parents=True, exist_ok=True)
 
 # RUTAS SERIES TEMPORALES
 RUTA_SINCRONIZACION_X = CARPETA_RESULTADOS / "sincronizacion_x_resultados.png"
-RUTA_SINCRONIZACION_Y1 = CARPETA_RESULTADOS / "sincronizacion_y_resultados.png"
-RUTA_SINCRONIZACION_Y2 = CARPETA_RESULTADOS / "sincronizacion_y_resultados2.png"
+RUTA_SINCRONIZACION_Y = CARPETA_RESULTADOS / "sincronizacion_y_resultados.png"
 RUTA_SINCRONIZACION_Z = CARPETA_RESULTADOS / "sincronizacion_z_resultados.png"
 # RUTAS ERRORES Y DISPERSIONES
 RUTA_ERROR_X_GRAFICA = CARPETA_RESULTADOS / "error_sincronizacion_x.png"
@@ -59,6 +66,8 @@ RUTA_HISTOGRAMA_IMAGENES = CARPETA_RESULTADOS / "histogramas.png"
 RUTA_IMAGEN_DESCIFRADA = CARPETA_RESULTADOS / "imagen_descifrada.png"
 RUTA_TIMINGS = CARPETA_RESULTADOS / "tiempo_procesos_esclavo.csv"
 
+RUTA_CORRELACION_BASE = CARPETA_RESULTADOS / "correlacion_original_vs_descifrada.csv"
+
 # RUTAS PARA DISTANCIA HAMMING
 RUTA_DISTANCIA_HAMMING_A = CARPETA_RESULTADOS / "hamming_vs_a.png"
 RUTA_DISTANCIA_HAMMING_CSV_A = CARPETA_RESULTADOS / "hamming_vs_a.csv"
@@ -66,6 +75,10 @@ RUTA_DISTANCIA_HAMMING_B = CARPETA_RESULTADOS / "hamming_vs_b.png"
 RUTA_DISTANCIA_HAMMING_CSV_B = CARPETA_RESULTADOS / "hamming_vs_b.csv"
 RUTA_DISTANCIA_HAMMING_C = CARPETA_RESULTADOS / "hamming_vs_c.png"
 RUTA_DISTANCIA_HAMMING_CSV_C = CARPETA_RESULTADOS / "hamming_vs_c.csv"
+RUTA_DISTANCIA_HAMMING_A_LOG = CARPETA_RESULTADOS / "hamming_vs_aLog.png"
+RUTA_DISTANCIA_HAMMING_CSV_A_LOG = CARPETA_RESULTADOS / "hamming_vs_aLog.csv"
+RUTA_DISTANCIA_HAMMING_X0_LOG = CARPETA_RESULTADOS / "hamming_vs_x0_log.png"
+RUTA_DISTANCIA_HAMMING_CSV_X0_LOG = CARPETA_RESULTADOS / "hamming_vs_x0_log.csv"
     
 def on_connect(client, userdata, flags, rc):
     print(f"[MQTT-ESCLAVO] Conectado al broker {BROKER}: {PORT} con TLS (rc={rc})")
@@ -87,7 +100,7 @@ def on_message_keys(client, userdata, msg):
     print(f"[MQTT-ESCLAVO] Keys recibidas en {msg.topic}")
 
 # ========== FUNCION DE ROSSLER ESCLAVO ==========
-def rossler_slave(state, y_m, a, b, c, k):
+def rossler_esclavo(state, y_m, a, b, c, k):
     x_s, y_s, z_s = state
     dxdt = -y_s - z_s
     dydt = x_s + a * y_s + k * (y_m - y_s)
@@ -96,46 +109,46 @@ def rossler_slave(state, y_m, a, b, c, k):
 
 def integrar_slave(y_maestro, h, a, b, c, k, x0):
     n = len(y_maestro)
-    t = np.linspace(0, (n - 1) * h, n, dtype=np.float64)
+    t_esclavo = np.linspace(0, (n - 1) * h, n, dtype=np.float64)
 
-    x = np.empty(n, dtype=np.float64)
-    y = np.empty(n, dtype=np.float64)
-    z = np.empty(n, dtype=np.float64)
-    x[0], y[0], z[0] = x0
+    x_esclavo = np.empty(n, dtype=np.float64)
+    y_esclavo = np.empty(n, dtype=np.float64)
+    z_esclavo = np.empty(n, dtype=np.float64)
+    x_esclavo[0], y_esclavo[0], z_esclavo[0] = x0
 
     for i in range(n - 1):
         y_m = y_maestro[i]
         # k1
-        dx1 = -y[i] - z[i]
-        dy1 = x[i] + a * y[i] + k * (y_m - y[i])
-        dz1 = b + z[i] * (x[i] - c)
+        dx1 = -y_esclavo[i] - z_esclavo[i]
+        dy1 = x_esclavo[i] + a * y_esclavo[i] + k * (y_m - y_esclavo[i])
+        dz1 = b + z_esclavo[i] * (x_esclavo[i] - c)
         # k2
-        x2 = x[i] + 0.5 * h * dx1
-        y2 = y[i] + 0.5 * h * dy1
-        z2 = z[i] + 0.5 * h * dz1
+        x2 = x_esclavo[i] + 0.5 * h * dx1
+        y2 = y_esclavo[i] + 0.5 * h * dy1
+        z2 = z_esclavo[i] + 0.5 * h * dz1
         dx2 = -y2 - z2
         dy2 = x2 + a * y2 + k * (y_m - y2)
         dz2 = b + z2 * (x2 - c)
         # k3
-        x3 = x[i] + 0.5 * h * dx2
-        y3 = y[i] + 0.5 * h * dy2
-        z3 = z[i] + 0.5 * h * dz2
+        x3 = x_esclavo[i] + 0.5 * h * dx2
+        y3 = y_esclavo[i] + 0.5 * h * dy2
+        z3 = z_esclavo[i] + 0.5 * h * dz2
         dx3 = -y3 - z3
         dy3 = x3 + a * y3 + k * (y_m - y3)
         dz3 = b + z3 * (x3 - c)
         # k4 (mismo y_m para cero‑orden)
-        x4 = x[i] + h * dx3
-        y4 = y[i] + h * dy3
-        z4 = z[i] + h * dz3
+        x4 = x_esclavo[i] + h * dx3
+        y4 = y_esclavo[i] + h * dy3
+        z4 = z_esclavo[i] + h * dz3
         dx4 = -y4 - z4
         dy4 = x4 + a * y4 + k * (y_m - y4)
         dz4 = b + z4 * (x4 - c)
 
-        x[i+1] = x[i] + (h/6.0) * (dx1 + 2*dx2 + 2*dx3 + dx4)
-        y[i+1] = y[i] + (h/6.0) * (dy1 + 2*dy2 + 2*dy3 + dy4)
-        z[i+1] = z[i] + (h/6.0) * (dz1 + 2*dz2 + 2*dz3 + dz4)
+        x_esclavo[i+1] = x_esclavo[i] + (h/6.0) * (dx1 + 2*dx2 + 2*dx3 + dx4)
+        y_esclavo[i+1] = y_esclavo[i] + (h/6.0) * (dy1 + 2*dy2 + 2*dy3 + dy4)
+        z_esclavo[i+1] = z_esclavo[i] + (h/6.0) * (dz1 + 2*dz2 + 2*dz3 + dz4)
 
-    return t, x, y, z
+    return t_esclavo, x_esclavo, y_esclavo, z_esclavo
 
 
 # ========== FUNCION DEL MAPA LOGISTICO ==========
@@ -153,15 +166,12 @@ def mapa_logistico(LOGISTIC_PARAMS, nmax):
     return vector_logistico
 
 # ========== FUNCION PARA REVERTIR LA CONFUSIÓN ==========
-def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
-    iteraciones = time_sinc + keystream
+def sincronizacion(y_maestro, t_maestro, ROSSLER_PARAMS, tiempo_sinc, keystream, nmax):
+    iteraciones = tiempo_sinc + keystream
 
-    if len(y_sinc) < iteraciones:
-        raise ValueError("La señal y_sinc recibida es más corta que el número de iteraciones esperado.")
+    y_maestro = y_maestro[:iteraciones]
 
-    y_maestro = y_sinc[:iteraciones]
-
-    t_slave, x_slave, y_slave, z_slave = integrar_slave(
+    t_esclavo, x_esclavo, y_esclavo, z_esclavo = integrar_slave(
         y_maestro=y_maestro,
         h=H,
         a=ROSSLER_PARAMS['a'],
@@ -171,24 +181,21 @@ def sincronizacion(y_sinc, times, ROSSLER_PARAMS, time_sinc, keystream, nmax):
         x0=X0
     )
 
-    if time_sinc + keystream > len(x_slave):
-        raise ValueError("x_slave más corto que time_sinc+keystream")
-
-    x_sinc = x_slave[time_sinc:time_sinc + keystream]
+    x_sinc = x_esclavo[tiempo_sinc:tiempo_sinc + keystream]
     x_sinc = np.resize(x_sinc, nmax)
 
-    return x_slave, y_slave, z_slave, t_slave, x_sinc
+    return x_esclavo, y_esclavo, z_esclavo, t_esclavo, x_sinc
 
 def revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax):
 
     difusion = vector_cifrado - vector_logistico - x_sinc
+    difusion = np.clip(difusion, 0.0, 1.0)
 
     return difusion
 
 def revertir_difusion(difusion, vector_logistico, nmax, ancho, alto):
     # 1. Regenerar vector de mezcla (mismo que el maestro)
     vector_mezcla = np.floor(vector_logistico * nmax).astype(int)
-    vector_mezcla = np.clip(vector_mezcla, 0, nmax - 1)
 
     # 2. Inicializar estructuras para revertir
     vector_temp = np.full(nmax, 260.0)
@@ -219,39 +226,37 @@ def extraer_parametros(receivedKeys, receivedData):
     ROSSLER_PARAMS = receivedKeys['ROSSLER_PARAMS']
     LOGISTIC_PARAMS = receivedKeys['LOGISTIC_PARAMS']
 
+    vector_cifrado = np.array(receivedData['vector_cifrado'])
     x_maestro = np.array(receivedData['x_maestro'])
     y_maestro = np.array(receivedData['y_maestro'])
     z_maestro = np.array(receivedData['z_maestro'])
-    times = np.array(receivedData['times'])
-
-    time_sinc = int(receivedData['time_sinc'])
-    nmax = int(receivedData['nmax'])
-    keystream = int(receivedData['KEYSTREAM'])
-
-    vector_cifrado = np.array(receivedData['vector_cifrado'])
+    t_maestro = np.array(receivedData['t_maestro'])
     ancho = int(receivedData['ancho'])
     alto = int(receivedData['alto'])
+    nmax = int(receivedData['nmax'])
+    tiempo_sinc = int(receivedData['tiempo_sinc'])
+    keystream = int(receivedData['KEYSTREAM'])
 
     return (
         ROSSLER_PARAMS,
         LOGISTIC_PARAMS,
+        vector_cifrado,
         x_maestro,
         y_maestro,
         z_maestro,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
+        t_maestro,
         ancho,
-        alto
+        alto,
+        nmax,
+        tiempo_sinc,
+        keystream
     )
     
 
-def grafica_serie_temporal(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo):
+def grafica_serie_temporal(t_maestro, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo):
     # Serie temporal en X
     plt.figure(figsize=(10, 6))
-    plt.plot(times, x_maestro, label='Maestro x(t)', linewidth = 1.4, color='red') # Señal del maestro
+    plt.plot(t_maestro, x_maestro, label='Maestro x(t)', linewidth = 1.4, color='red') # Señal del maestro
     plt.plot(t_esclavo, x_esclavo, label='Esclavo x(t)', linewidth = 1.4, linestyle='--', alpha=0.9)
     plt.xlabel("Tiempo (s)")
     plt.ylabel("x(t)")
@@ -263,7 +268,7 @@ def grafica_serie_temporal(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_
 
     # Serie temporal en Y
     plt.figure(figsize=(10, 6))
-    plt.plot(times, y_maestro, label='Maestro y(t)', linewidth = 1.4, color='red') # Señal del maestro
+    plt.plot(t_maestro, y_maestro, label='Maestro y(t)', linewidth = 1.4, color='red') # Señal del maestro
     plt.plot(t_esclavo, y_esclavo, label='Esclavo y(t)', linewidth = 1.4, linestyle='--', alpha=0.9)
     plt.xlabel("Tiempo (s)")
     plt.ylabel("y(t)")
@@ -271,11 +276,11 @@ def grafica_serie_temporal(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_
     plt.legend(loc="upper right", frameon=False)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(RUTA_SINCRONIZACION_Y1, dpi=300)
+    plt.savefig(RUTA_SINCRONIZACION_Y, dpi=300)
 
     # Serie temporal en Z
     plt.figure(figsize=(10, 6))
-    plt.plot(times, z_maestro, label='Maestro z(t)', linewidth = 1.4, color='red')
+    plt.plot(t_maestro, z_maestro, label='Maestro z(t)', linewidth = 1.4, color='red')
     plt.plot(t_esclavo, z_esclavo, label='Esclavo z(t)', linewidth = 1.4, linestyle='--', alpha=0.9)
     plt.xlabel("Tiempo (s)")
     plt.ylabel("z(t)")
@@ -285,44 +290,13 @@ def grafica_serie_temporal(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_
     plt.tight_layout()
     plt.savefig(RUTA_SINCRONIZACION_Z, dpi=300)
 
-    # Gráfica primeros datos
-    n_maestro = max(1, int(0.15 * len(times)))
-    n_esclavo = max(1, int(0.15 * len(t_esclavo)))
 
-    times_25 = times[:n_maestro]
-    y_maestro_25 = y_maestro[:n_maestro]
-    t_esclavo_25 = t_esclavo[:n_esclavo]
-    y_esclavo_25 = y_esclavo[:n_esclavo]
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(times_25, y_maestro_25, label="Maestro  y(t)", linewidth=1.4)
-    plt.plot(t_esclavo_25, y_esclavo_25, label="Esclavo  y(t)", linewidth=1.4, linestyle="--", alpha=0.9)
-    plt.xlabel("Tiempo")
-    plt.ylabel("y(t)")
-    plt.title("Serie temporal de y(t) - Etapa de acoplamiento")
-    plt.legend(loc="upper right", frameon=False)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(RUTA_SINCRONIZACION_Y2, dpi=300)
-
-def graficar_error_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo, error_x, error_y, error_z):
-    n_comun = min(len(times), len(t_esclavo))
-    if n_comun <= 0:
-        print("[GRAFICAS] No hay suficientes datos para graficar error y dispersión.")
-        return
-
-    t_comun = times[:n_comun]
-    x_maestro_c = x_maestro[:n_comun]
-    x_esclavo_c = x_esclavo[:n_comun]
-    y_maestro_c = y_maestro[:n_comun]
-    y_esclavo_c = y_esclavo[:n_comun]
-    z_maestro_c = z_maestro[:n_comun]
-    z_esclavo_c = z_esclavo[:n_comun]
+def graficar_error_dispersion(t_maestro, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo, error_x, error_y, error_z):
 
     # ==================== GRÁFICA ERROR VS TIEMPO ====================
     # En x
     plt.figure(figsize=(10, 6))
-    plt.plot(t_comun, error_x, linewidth=1.4)
+    plt.plot(t_maestro, error_x, linewidth=1.4)
     plt.xlabel("Tiempo")
     plt.ylabel("|x_m(t) - x_s(t)|")
     plt.title("Error en la serie x(t) entre maestro y esclavo")
@@ -333,7 +307,7 @@ def graficar_error_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo,
 
     # En y
     plt.figure(figsize=(10, 6))
-    plt.plot(t_comun, error_y, linewidth=1.4)
+    plt.plot(t_maestro, error_y, linewidth=1.4)
     plt.xlabel("Tiempo")
     plt.ylabel("|y_m(t) - y_s(t)|")
     plt.title("Error en la serie y(t) entre maestro y esclavo")
@@ -344,7 +318,7 @@ def graficar_error_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo,
 
     # En z
     plt.figure(figsize=(10, 6))
-    plt.plot(t_comun, error_z, linewidth=1.4)
+    plt.plot(t_maestro, error_z, linewidth=1.4)
     plt.xlabel("Tiempo")
     plt.ylabel("|z_m(t) - z_s(t)|")
     plt.title("Error en la serie z(t) entre maestro y esclavo")
@@ -356,9 +330,9 @@ def graficar_error_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo,
     # ==================== DIAGRAMA DE DISPERSIÓN ====================
     # En X
     plt.figure(figsize=(10, 6))
-    plt.scatter(x_maestro_c, x_esclavo_c, s=8, alpha=0.6,)
-    min_val = min(x_maestro_c.min(), x_esclavo_c.min())
-    max_val = max(x_maestro_c.max(), x_esclavo_c.max())
+    plt.scatter(x_maestro, x_esclavo, s=8, alpha=0.6,)
+    min_val = min(x_maestro.min(), x_esclavo.min())
+    max_val = max(x_maestro.max(), x_esclavo.max())
     plt.plot([min_val, max_val], [min_val, max_val], linewidth=1.0, linestyle="--")
     plt.xlabel("x_m(t)  (maestro)")
     plt.ylabel("x_s(t)  (esclavo)")
@@ -369,9 +343,9 @@ def graficar_error_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo,
 
     # En Y
     plt.figure(figsize=(10, 6))
-    plt.scatter(y_maestro_c, y_esclavo_c, s=8, alpha=0.6,)
-    min_val = min(y_maestro_c.min(), y_esclavo_c.min())
-    max_val = max(y_maestro_c.max(), y_esclavo_c.max())
+    plt.scatter(y_maestro, y_esclavo, s=8, alpha=0.6,)
+    min_val = min(y_maestro.min(), y_esclavo.min())
+    max_val = max(y_maestro.max(), y_esclavo.max())
     plt.plot([min_val, max_val], [min_val, max_val], linewidth=1.0, linestyle="--")
     plt.xlabel("y_m(t)  (maestro)")
     plt.ylabel("y_s(t)  (esclavo)")
@@ -382,9 +356,9 @@ def graficar_error_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo,
 
     # En Z
     plt.figure(figsize=(10, 6))
-    plt.scatter(z_maestro_c, z_esclavo_c, s=8, alpha=0.6,)
-    min_val = min(z_maestro_c.min(), z_esclavo_c.min())
-    max_val = max(z_maestro_c.max(), z_esclavo_c.max())
+    plt.scatter(z_maestro, z_esclavo, s=8, alpha=0.6,)
+    min_val = min(z_maestro.min(), z_esclavo.min())
+    max_val = max(z_maestro.max(), z_esclavo.max())
     plt.plot([min_val, max_val], [min_val, max_val], linewidth=1.0, linestyle="--")
     plt.xlabel("z_m(t)  (maestro)")
     plt.ylabel("z_s(t)  (esclavo)")
@@ -400,15 +374,22 @@ def graficar_histogramas():
     pix_original = np.array(img_original).ravel()
     pix_descifrada = np.array(img_descifrada).ravel()
 
-    plt.figure(figsize=(10, 6))
     bins = np.arange(257)
-    plt.hist(pix_original, bins=bins, density=True, alpha=0.5, label="Imagen original")
-    plt.hist(pix_descifrada, bins=bins, density=True, alpha=0.5, label="Imagen descifrada")
-    plt.xlabel("Intensidad (0 - 255)")
-    plt.ylabel("Densidad de probabilidad")
-    plt.title("Histograma de intensidades: original vs descifrada (escala de grises)")
-    plt.legend(loc="upper right", frameon=False)
-    plt.grid(True, alpha=0.3)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharey=True)
+
+    axes[0].hist(pix_original, bins=bins, density=True, alpha=0.8, color="C0")
+    axes[0].set_title("Imagen original")
+    axes[0].set_xlabel("Intensidad (0 - 255)")
+    axes[0].set_ylabel("Densidad de probabilidad")
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].hist(pix_descifrada, bins=bins, density=True, alpha=0.8, color="C1")
+    axes[1].set_title("Imagen descifrada")
+    axes[1].set_xlabel("Intensidad (0 - 255)")
+    axes[1].grid(True, alpha=0.3)
+
+    fig.suptitle("Histogramas de intensidades: original vs descifrada (escala de grises)", y=1.02)
     plt.tight_layout()
     plt.savefig(RUTA_HISTOGRAMA_IMAGENES, dpi=300)
 
@@ -441,6 +422,34 @@ def graficar_dispersion_pixeles(muestreo = 10000):
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(RUTA_DISPERSION_PIXELES, dpi=300)
+
+def coeficiente_correlacion_imagenes(imagen_original, imagen_descifrada):
+    """
+    Calcula el coeficiente de correlación de Pearson entre la imagen original
+    y la imagen descifrada (trabajando en escala de grises).
+    """
+    # Convertir a escala de grises y a float
+    img_orig = np.array(imagen_original.convert("L"), dtype=np.float64)
+    img_decr = np.array(imagen_descifrada.convert("L"), dtype=np.float64)
+
+    # Aplanar
+    orig_flat = img_orig.flatten()
+    decr_flat = img_decr.flatten()
+
+    # Emparejar longitudes
+    n = min(orig_flat.size, decr_flat.size)
+    orig_flat = orig_flat[:n]
+    decr_flat = decr_flat[:n]
+
+    # Evitar problemas de desviación estándar cero o muy pocos datos
+    if n < 2 or np.std(orig_flat) == 0 or np.std(decr_flat) == 0:
+        corr = 0.0
+    else:
+        corr_matrix = np.corrcoef(orig_flat, decr_flat)
+        corr = float(corr_matrix[0, 1])
+
+    print(f"[CORR] Coeficiente de correlación: {corr:.6f}")
+    return corr
 
 def distancia_hamming(imagen_original, imagen_descifrada):
     img_original = np.array(imagen_original.convert("L"), dtype=np.uint8)
@@ -634,6 +643,128 @@ def experimento_hamming_vs_c(
         plt.close()
         print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_C}")
 
+def experimento_hamming_vs_logistico(
+    LOGISTIC_PARAMS,
+    vector_cifrado,
+    ancho,
+    alto,
+    nmax,
+    x_sinc,
+    vector_logistico_original,
+    img_original
+):
+    aLog_original = float(LOGISTIC_PARAMS["aLog"])
+
+    base_aLog = np.arange(3.97, 4.0 + 1e-6, 0.001)
+    valores_aLog = list(base_aLog)
+
+    if not any(np.isclose(aLog_original, v, atol=1e-15) for v in valores_aLog):
+        valores_aLog.append(aLog_original)
+
+    valores_aLog = sorted(valores_aLog)
+    resultados_aLog = []
+
+    print("[HAMMING-LOG] Iniciando experimento Hamming vs aLog del mapa logístico...")
+
+    for a_val in valores_aLog:
+        es_original = np.isclose(a_val, aLog_original, atol=1e-15)
+        if es_original:
+            print(f"[HAMMING-LOG] Evaluando aLog = {a_val:.15f} (valor ORIGINAL del maestro, reutilizando vector_logistico_original)...")
+            vector_logistico_test = vector_logistico_original
+        else:
+            print(f"[HAMMING-LOG] Evaluando aLog = {a_val:.15f}...")
+
+            params_test = dict(LOGISTIC_PARAMS)
+            params_test['aLog'] = float(a_val)
+
+            vector_logistico_test = mapa_logistico(params_test, nmax)
+
+        difusion = revertir_confusion(vector_cifrado, vector_logistico_test, x_sinc, nmax)
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico_test, nmax, ancho, alto)
+
+        nombre_img = f"hamming_aLog_{a_val:.3f}".replace(".", "_") + ".png"
+        ruta_img = CARPETA_HAMMING_LOGISTIC / nombre_img
+        imagen_descifrada.save(ruta_img)
+        print(f"[HAMMING-LOG] Imagen descifrada guardada en {ruta_img}")
+
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+
+        resultados_aLog.append({
+            "aLog": a_val,
+            "aLog_es_original": int(es_original),
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+
+    df_aLog = pd.DataFrame(resultados_aLog)
+    df_aLog.to_csv(RUTA_DISTANCIA_HAMMING_CSV_A_LOG, index=False)
+    print(f"[HAMMING-LOG] Resultados Hamming vs aLog guardados en {RUTA_DISTANCIA_HAMMING_CSV_A_LOG}")
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(df_aLog["aLog"], df_aLog["hamming_abs"], marker="o", linewidth=0.8)
+    plt.xlabel("aLog")
+    plt.ylabel("Distancia de Hamming absoluta")
+    plt.title("Distancia de Hamming imagen original vs descifrada\n(barrido en aLog del mapa logístico)")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(RUTA_DISTANCIA_HAMMING_A_LOG, dpi=300)
+    plt.close()
+    print(f"[HAMMING-LOG] Gráfico Hamming vs aLog guardado en {RUTA_DISTANCIA_HAMMING_A_LOG}")
+
+    x0_original = float(LOGISTIC_PARAMS["x0_log"])
+    base_x0 = np.arange(0.3, 0.5 + 1e-6, 0.01)
+    valores_x0 = list(base_x0)
+    if not any(np.isclose(x0_original, v, atol=1e-15) for v in valores_x0):
+        valores_x0.append(x0_original)
+    valores_x0 = sorted(valores_x0)
+
+    resultados_x0 = []
+
+    print("[HAMMING-LOG] Iniciando experimento Hamming vs x0_log del mapa logístico...")
+
+    for x0_val in valores_x0:
+        es_original_x0 = np.isclose(x0_val, x0_original, atol=1e-15)
+        if es_original_x0:
+            print(f"[HAMMING-LOG] Evaluando x0_log = {x0_val:.15f} (valor ORIGINAL del maestro)...")
+        else:
+            print(f"[HAMMING-LOG] Evaluando x0_log = {x0_val:.15f}...")
+
+        params_test = dict(LOGISTIC_PARAMS)
+        params_test["x0_log"] = float(x0_val)
+
+        vector_logistico_test = mapa_logistico(params_test, nmax)
+        difusion = revertir_confusion(vector_cifrado, vector_logistico_test, x_sinc, nmax)
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico_test, nmax, ancho, alto)
+
+        nombre_img = f"hamming_x0_log_{x0_val:.3f}".replace(".", "_") + ".png"
+        ruta_img = CARPETA_HAMMING_LOGISTIC / nombre_img
+        imagen_descifrada.save(ruta_img)
+        print(f"[HAMMING-LOG] Imagen descifrada guardada en {ruta_img}")
+
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+
+        resultados_x0.append({
+            "x0_log": x0_val,
+            "x0_log_es_original": int(es_original_x0),
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+
+    df_x0 = pd.DataFrame(resultados_x0)
+    df_x0.to_csv(RUTA_DISTANCIA_HAMMING_CSV_X0_LOG, index=False)
+    print(f"[HAMMING-LOG] Resultados Hamming vs x0_log guardados en {RUTA_DISTANCIA_HAMMING_CSV_X0_LOG}")
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(df_x0["x0_log"], df_x0["hamming_abs"], marker="o", linewidth=0.8)
+    plt.xlabel("x0_log")
+    plt.ylabel("Distancia de Hamming absoluta")
+    plt.title("Distancia de Hamming imagen original vs descifrada\n(barrido en x0_log del mapa logístico)")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(RUTA_DISTANCIA_HAMMING_X0_LOG, dpi=300)
+    plt.close()
+    print(f"[HAMMING-LOG] Gráfico Hamming vs x0_log guardado en {RUTA_DISTANCIA_HAMMING_X0_LOG}")
+
 def guardar_errores_csv(t_slave, error_x, error_y, error_z):
     df_error = pd.DataFrame({
         'Tiempo': t_slave,
@@ -686,23 +817,23 @@ def main():
     (
         ROSSLER_PARAMS,
         LOGISTIC_PARAMS,
+        vector_cifrado,
         x_maestro,
         y_maestro,
         z_maestro,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
+        t_maestro,
         ancho,
-        alto
+        alto,
+        nmax,
+        tiempo_sinc,
+        keystream
     ) = extraer_parametros(RECEIVED_KEYS, RECEIVED_DATA)
 
     # ========== PROCESO DE SINCRONIZACIÓN ==========
     print("[SINCRONIZACIÓN] Sincronizando sistema esclavo...")
     t_inicio_sincronizacion = time.perf_counter()
-    x_esclavo, y_esclavo, z_esclavo, t_slave, x_sinc = sincronizacion(
-    y_maestro, times, ROSSLER_PARAMS, time_sinc, keystream, nmax
+    x_esclavo, y_esclavo, z_esclavo, t_esclavo, x_sinc = sincronizacion(
+    y_maestro, t_maestro, ROSSLER_PARAMS, tiempo_sinc, keystream, nmax
     )
     t_fin_sincronizacion = time.perf_counter()
 
@@ -731,30 +862,45 @@ def main():
     imagen_descifrada.save(RUTA_IMAGEN_DESCIFRADA)
     print(f"[DESCIFRADO] Imagen descifrada guardada en {RUTA_IMAGEN_DESCIFRADA}")
     # ========== GUARDADO DE RESULTADOS ==========
-    n_sync = min(len(times), len(x_maestro), len(y_maestro), len(z_maestro),
-                 len(t_slave), len(x_esclavo), len(y_esclavo), len(z_esclavo))
+    n_sync = min(len(t_maestro), len(x_maestro), len(y_maestro), len(z_maestro),
+                 len(t_esclavo), len(x_esclavo), len(y_esclavo), len(z_esclavo))
     error_x = np.abs(x_maestro[:n_sync] - x_esclavo[:n_sync])
     error_y = np.abs(y_maestro[:n_sync] - y_esclavo[:n_sync])
     error_z = np.abs(z_maestro[:n_sync] - z_esclavo[:n_sync])
 
     grafica_serie_temporal(
-        times[:n_sync], x_maestro[:n_sync], y_maestro[:n_sync], z_maestro[:n_sync],
-        t_slave[:n_sync], x_esclavo[:n_sync], y_esclavo[:n_sync], z_esclavo[:n_sync]
+        t_maestro[:n_sync], x_maestro[:n_sync], y_maestro[:n_sync], z_maestro[:n_sync],
+        t_esclavo[:n_sync], x_esclavo[:n_sync], y_esclavo[:n_sync], z_esclavo[:n_sync]
     )
     graficar_error_dispersion(
-        times[:n_sync], x_maestro[:n_sync], y_maestro[:n_sync], z_maestro[:n_sync],
-        t_slave[:n_sync], x_esclavo[:n_sync], y_esclavo[:n_sync], z_esclavo[:n_sync],
+        t_maestro[:n_sync], x_maestro[:n_sync], y_maestro[:n_sync], z_maestro[:n_sync],
+        t_esclavo[:n_sync], x_esclavo[:n_sync], y_esclavo[:n_sync], z_esclavo[:n_sync],
         error_x, error_y, error_z
     )
     graficar_histogramas()
     graficar_dispersion_pixeles()
-    guardar_errores_csv(t_slave, error_x, error_y, error_z)
+    guardar_errores_csv(t_esclavo, error_x, error_y, error_z)
+    img_original_base = Image.open(RUTA_IMAGEN_ORIGINAL)
+    coef_corr_base = coeficiente_correlacion_imagenes(img_original_base, imagen_descifrada)
+
+    # Guardar correlación en CSV
+    df_corr_base = pd.DataFrame([{
+        "descripcion": "correlacion_original_vs_descifrada",
+        "coef_corr": coef_corr_base
+    }])
+    df_corr_base.to_csv(
+        RUTA_CORRELACION_BASE,
+        index=False,
+        mode="a",
+        header=not RUTA_CORRELACION_BASE.exists()
+    )
+    print(f"[CORR] Correlación base guardada en {RUTA_CORRELACION_BASE}")
     experimento_hamming_vs_a(
         ROSSLER_PARAMS,
         LOGISTIC_PARAMS,
         y_maestro,
-        times,
-        time_sinc,
+        t_maestro,
+        tiempo_sinc,
         nmax,
         keystream,
         vector_cifrado,
@@ -762,32 +908,32 @@ def main():
         alto,
         vector_logistico
     )
-    experimento_hamming_vs_b(
-        ROSSLER_PARAMS,
-        LOGISTIC_PARAMS,
-        y_maestro,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
-        ancho,
-        alto,
-        vector_logistico
-    )
-    experimento_hamming_vs_c(
-        ROSSLER_PARAMS,
-        LOGISTIC_PARAMS,
-        y_maestro,
-        times,
-        time_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
-        ancho,
-        alto,
-        vector_logistico
-    )
+    # experimento_hamming_vs_b(
+    #     ROSSLER_PARAMS,
+    #     LOGISTIC_PARAMS,
+    #     y_maestro,
+    #     t_maestro,
+    #     tiempo_sinc,
+    #     nmax,
+    #     keystream,
+    #     vector_cifrado,
+    #     ancho,
+    #     alto,
+    #     vector_logistico
+    # )
+    # experimento_hamming_vs_c(
+    #     ROSSLER_PARAMS,
+    #     LOGISTIC_PARAMS,
+    #     y_maestro,
+    #     t_maestro,
+    #     tiempo_sinc,
+    #     nmax,
+    #     keystream,
+    #     vector_cifrado,
+    #     ancho,
+    #     alto,
+    #     vector_logistico
+    # )
 
     # ========== REGISTRO DE TIEMPOS ==========
     tiempo_mqtt = t_fin_mqtt - t_inicio_mqtt
@@ -800,6 +946,17 @@ def main():
     print(f"[TIEMPOS] Tiempo descifrado: {tiempo_descifrado:.4f} segundos")
     print(f"[TIEMPOS] Tiempo total: {tiempo_total:.4f} segundos")
     tiempos_procesos(tiempo_mqtt, tiempo_sincronizacion, tiempo_descifrado, tiempo_total)
+
+    experimento_hamming_vs_logistico(
+        LOGISTIC_PARAMS,
+        vector_cifrado,
+        ancho,
+        alto,
+        nmax,
+        x_sinc,
+        vector_logistico,
+        img_original_base
+    )
 
 if __name__ == "__main__":
     main()

@@ -108,14 +108,14 @@ def mapa_logistico(LOGISTIC_PARAMS, nmax):
     return vector_logistico
 
 # ========== FUNCION PARA REVERTIR LA CONFUSIÓN ==========
-def sincronizacion(y_maestro, tiempos, ROSSLER_PARAMS, tiempo_sinc, nmax):
+def sincronizacion(y_maestro, t_maestro, ROSSLER_PARAMS, tiempo_sinc, nmax):
 
     iteraciones = tiempo_sinc + nmax
     t_span = (0, iteraciones*H)
     t_eval = np.linspace(0, iteraciones*H, iteraciones)
 
     y_maestro_interp = interp1d(
-        tiempos,
+        t_maestro,
         y_maestro,
         kind='cubic',
         fill_value="extrapolate"
@@ -139,9 +139,10 @@ def sincronizacion(y_maestro, tiempos, ROSSLER_PARAMS, tiempo_sinc, nmax):
     x_esclavo = sol_esclavo.y[0]
     y_esclavo = sol_esclavo.y[1]
     z_esclavo = sol_esclavo.y[2]
+    t_esclavo = sol_esclavo.t
     x_sinc = sol_esclavo.y[0][tiempo_sinc:tiempo_sinc + nmax]
 
-    return y_maestro_interp, t_eval, x_esclavo, y_esclavo, z_esclavo, sol_esclavo.t, x_sinc
+    return x_esclavo, y_esclavo, z_esclavo, t_esclavo, x_sinc
 
 def revertir_confusion(vector_cifrado, vector_logistico, x_sinc):
 
@@ -186,7 +187,7 @@ def extraer_parametros(receivedKeys, receivedData):
     x_maestro = np.array(receivedData['x_maestro'])
     y_maestro = np.array(receivedData['y_maestro'])
     z_maestro = np.array(receivedData['z_maestro'])
-    times = np.array(receivedData['times'])
+    t_maestro = np.array(receivedData['t_maestro'])
     ancho = int(receivedData['ancho'])
     alto = int(receivedData['alto'])
     nmax = int(receivedData['nmax'])
@@ -199,7 +200,7 @@ def extraer_parametros(receivedKeys, receivedData):
         x_maestro,
         y_maestro,
         z_maestro,
-        times,
+        t_maestro,
         ancho,
         alto,
         nmax,
@@ -486,20 +487,20 @@ def main():
         x_maestro,
         y_maestro,
         z_maestro,
-        times,
+        t_maestro,
         ancho,
         alto,
         nmax,
         time_sinc
     ) = extraer_parametros(RECEIVED_KEYS, RECEIVED_DATA)
     # Imprimir longitud de times, nmax, ancho, alto y time_sinc
-    print(f"[EXTRACCIÓN] Longitud times: {len(times)}, nmax: {nmax}, ancho: {ancho}, alto: {alto}, time_sinc: {time_sinc}")
+    print(f"[EXTRACCIÓN] Longitud times: {len(t_maestro)}, nmax: {nmax}, ancho: {ancho}, alto: {alto}, time_sinc: {time_sinc}")
 
     # ========== PROCESO DE SINCRONIZACIÓN ==========
     print("[SINCRONIZACIÓN] Sincronizando sistema esclavo...")
     t_inicio_sincronizacion = time.perf_counter()
-    y_master_interp, t_eval, x_esclavo, y_esclavo, z_esclavo, t_esclavo, x_sinc = sincronizacion(
-        y_maestro, times, ROSSLER_PARAMS, time_sinc, nmax
+    x_esclavo, y_esclavo, z_esclavo, t_esclavo, x_sinc = sincronizacion(
+        y_maestro, t_maestro, ROSSLER_PARAMS, time_sinc, nmax
     )
     t_fin_sincronizacion = time.perf_counter()
 
@@ -531,8 +532,8 @@ def main():
     error_x = np.abs(x_maestro - x_esclavo)
     error_y = np.abs(y_maestro - y_esclavo)
     error_z = np.abs(z_maestro - z_esclavo)
-    grafica_serie_temporal(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo)
-    graficar_errores_dispersion(times, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo, error_x, error_y, error_z)
+    grafica_serie_temporal(t_maestro, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo)
+    graficar_errores_dispersion(t_maestro, x_maestro, y_maestro, z_maestro, t_esclavo, x_esclavo, y_esclavo, z_esclavo, error_x, error_y, error_z)
     graficar_histogramas()
     graficar_dispersion_pixeles()
     guardar_errores(t_esclavo, error_x, error_y, error_z)
