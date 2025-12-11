@@ -31,8 +31,8 @@ RECEIVED_DATA = None
 
 # ========== PARAMETROS DE ROSSLER ==========
 H = 0.01
-K = 2.0
-X0 = [1.0, 1.0, 1.0]
+K = 0.0
+X0 = [0.1, 0.1, 0.1]
 
 # Parámetros característicos de prueba, estos son distintos a los del maestro
 A = 0.3
@@ -881,6 +881,7 @@ def main():
     graficar_dispersion_pixeles()
     guardar_errores_csv(t_esclavo, error_x, error_y, error_z)
     img_original_base = Image.open(RUTA_IMAGEN_ORIGINAL)
+    distancia_hamming(Image.open(RUTA_IMAGEN_ORIGINAL), imagen_descifrada)
     coef_corr_base = coeficiente_correlacion_imagenes(img_original_base, imagen_descifrada)
 
     # Guardar correlación en CSV
@@ -895,19 +896,19 @@ def main():
         header=not RUTA_CORRELACION_BASE.exists()
     )
     print(f"[CORR] Correlación base guardada en {RUTA_CORRELACION_BASE}")
-    experimento_hamming_vs_a(
-        ROSSLER_PARAMS,
-        LOGISTIC_PARAMS,
-        y_maestro,
-        t_maestro,
-        tiempo_sinc,
-        nmax,
-        keystream,
-        vector_cifrado,
-        ancho,
-        alto,
-        vector_logistico
-    )
+    # experimento_hamming_vs_a(
+    #     ROSSLER_PARAMS,
+    #     LOGISTIC_PARAMS,
+    #     y_maestro,
+    #     t_maestro,
+    #     tiempo_sinc,
+    #     nmax,
+    #     keystream,
+    #     vector_cifrado,
+    #     ancho,
+    #     alto,
+    #     vector_logistico
+    # )
     # experimento_hamming_vs_b(
     #     ROSSLER_PARAMS,
     #     LOGISTIC_PARAMS,

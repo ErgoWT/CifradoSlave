@@ -29,8 +29,8 @@ RECEIVED_DATA = None
 
 # ========== PARAMETROS DE ROSSLER ==========
 H = 0.01
-K = 2.0
-X0 = [1.0, 1.0, 1.0]
+K = 0.0
+X0 = [0.1, 0.1, 0.1]
 # Parámetros característicos de prueba, estos son distintos a los del maestro
 A = 0.3
 B = 0.201
