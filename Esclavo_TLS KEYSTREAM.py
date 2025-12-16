@@ -22,15 +22,15 @@ TOPIC_KEYS = "chaoskeystream/keys"
 TOPIC_DATA = "chaoskeystream/data"
 CA_CERT_PATH = "/home/tunchi/CifradoSlave/certs/ca.crt"
 QOS = 1
-
+IMG_SCALE = 50
 # ========== PARAMETROS GLOBALES PARA ALMACENAMIENTO ==========
 RECEIVED_KEYS = None
 RECEIVED_DATA = None
 
 # ========== PARAMETROS DE ROSSLER ==========
 H = 0.01
-K = 0.0
-X0 = [0.1, 0.1, 0.1]
+K = 2.0
+X0 = [1.0, 1.0, 1.0]
 # Parámetros característicos de prueba, estos son distintos a los del maestro
 A = 0.3
 B = 0.201
@@ -104,7 +104,7 @@ def rossler_esclavo(t, state, y_master_interp, a, b, c, k):
     x_s, y_s, z_s = state
     y_m = y_master_interp(t)
     dxdt = -y_s - z_s
-    dydt = x_s + a * y_s + k * (y_m - y_s)
+    dydt = x_s + A * y_s + k * (y_m - y_s)
     dzdt = b + z_s * (x_s - c)
     return [dxdt, dydt, dzdt]
 
@@ -136,7 +136,6 @@ def sincronizacion(y_maestro, times, ROSSLER_PARAMS, time_sinc, keystream, nmax)
         fill_value="extrapolate"
     )    
 
-    
     sol_esclavo = solve_ivp(
         fun = rossler_esclavo,
         t_span = t_span,
@@ -147,28 +146,22 @@ def sincronizacion(y_maestro, times, ROSSLER_PARAMS, time_sinc, keystream, nmax)
                 ROSSLER_PARAMS['b'], 
                 ROSSLER_PARAMS['c'], 
                 K),
-        rtol = 1e-5,
-        atol = 1e-5,
-        method='RK45'
+        rtol = 1e-6,
+        atol = 1e-8,
+        method='RK23'
     )
     
     x_esclavo = sol_esclavo.y[0]
     y_esclavo = sol_esclavo.y[1]
     z_esclavo = sol_esclavo.y[2]
     t_esclavo = sol_esclavo.t
-    x_sinc = sol_esclavo.y[0][time_sinc:iteraciones]
+    x_sinc = sol_esclavo.y[0][time_sinc:]
     x_sinc = np.resize(x_sinc, nmax)
     return x_esclavo, y_esclavo, z_esclavo, t_esclavo, x_sinc
 
-def revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax):
+def revertir_confusion(vector_cifrado, vector_logistico, x_sinc):
 
     difusion = vector_cifrado - vector_logistico - x_sinc
-
-    """
-    CAMBIO, POSIBLEMENTE X_SINC AL NO CONVERGER A UN VALOR DE ERROR DE CERO, OBTENGA VALORES FUERA DEL RANGO [0,1]
-    """
-    # Corrección parcial, evaluar difusión, y todos los valores fuera de rango se ponen a 0 o 1, si son menos a 0, se redondean a 0, si son mayores a 1, se redondean a 1
-    difusion = np.clip(difusion, 0.0, 1.0) # np.clip limita los valores fuera del rango [0,1]
 
     return difusion
 
@@ -197,7 +190,8 @@ def revertir_difusion(difusion, vector_logistico, nmax, ancho, alto):
             contador += 1
 
     # 5. Reconstruir la imagen
-    img_array = (vector_temp * 255).reshape(alto, ancho, 3).astype(np.uint8)
+    img_array = np.round(vector_temp * 255.0).clip(0, 255).astype(np.uint8)
+    img_array = img_array.reshape((alto, ancho, 3))
     return Image.fromarray(img_array)
 
 def extraer_parametros(receivedKeys, receivedData):
@@ -370,26 +364,12 @@ def graficar_histogramas():
     plt.tight_layout()
     plt.savefig(RUTA_HISTOGRAMA_IMAGENES, dpi=300)
 
-def graficar_dispersion_pixeles(muestreo = 10000):
+def graficar_dispersion_pixeles():
     img_original = Image.open(RUTA_IMAGEN_ORIGINAL).convert("L")
     img_descifrada = Image.open(RUTA_IMAGEN_DESCIFRADA).convert("L")
 
-    pix_original = np.array(img_original).ravel()
-    pix_descifrada = np.array(img_descifrada).ravel()
-
-    n_comun = min(len(pix_original), len(pix_descifrada))
-
-    pix_original = pix_original[:n_comun]
-    pix_descifrada = pix_descifrada[:n_comun]
-
-    # Muestreo opcional para no saturar
-    if n_comun > muestreo:
-        indices = np.random.choice(n_comun, size=muestreo, replace=False)
-        pix_original = pix_original[indices]
-        pix_descifrada = pix_descifrada[indices]
-
     plt.figure(figsize=(10, 6))
-    plt.scatter(pix_original, pix_descifrada, s=5, alpha=0.4)
+    plt.scatter(img_original, img_descifrada, s=5, alpha=0.4)
     min_val = 0
     max_val = 255
     plt.plot([min_val, max_val], [min_val, max_val], linewidth=1.0, linestyle="--")
@@ -826,8 +806,9 @@ def main():
     print("[DESCIFRADO] Vector logístico generado.")
 
     # Revertir la confusión
-    difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+    difusion_x = revertir_confusion(vector_cifrado, vector_logistico, x_sinc)
     print("[DESCIFRADO] Confusión revertida.")
+    difusion = difusion_x * IMG_SCALE
 
     # Revertir la difusión
     imagen_descifrada = revertir_difusion(
@@ -917,16 +898,16 @@ def main():
     #     alto,
     #     vector_logistico
     # )
-    experimento_hamming_vs_logistico(
-        LOGISTIC_PARAMS,
-        vector_cifrado,
-        ancho,
-        alto,
-        nmax,
-        x_sinc,
-        vector_logistico,
-        img_original_base
-    )
+    # experimento_hamming_vs_logistico(
+    #     LOGISTIC_PARAMS,
+    #     vector_cifrado,
+    #     ancho,
+    #     alto,
+    #     nmax,
+    #     x_sinc,
+    #     vector_logistico,
+    #     img_original_base
+    # )
 
 if __name__ == "__main__":
     main()
