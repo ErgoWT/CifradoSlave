@@ -22,7 +22,7 @@ TOPIC_KEYS = "chaoskeystream/keys"
 TOPIC_DATA = "chaoskeystream/data"
 CA_CERT_PATH = "/home/tunchi/CifradoSlave/certs/ca.crt"
 QOS = 1
-IMG_SCALE = 50
+IMG_SCALE = 100
 # ========== PARAMETROS GLOBALES PARA ALMACENAMIENTO ==========
 RECEIVED_KEYS = None
 RECEIVED_DATA = None
@@ -104,7 +104,7 @@ def rossler_esclavo(t, state, y_master_interp, a, b, c, k):
     x_s, y_s, z_s = state
     y_m = y_master_interp(t)
     dxdt = -y_s - z_s
-    dydt = x_s + A * y_s + k * (y_m - y_s)
+    dydt = x_s + a * y_s + k * (y_m - y_s)
     dzdt = b + z_s * (x_s - c)
     return [dxdt, dydt, dzdt]
 
@@ -480,13 +480,18 @@ def experimento_hamming_vs_a(
         print(f"[HAMMING] Evaluando a = {a_val:.2f}...")
         params_test = dict(ROSSLER_PARAMS)
         params_test['a'] = float(a_val)
+        # Se añade la siguiente instruccion para asegurar utilizar el valor real de rosslerparams
+        # cuando valores_a contenga 0.2 (valor original)
+        if abs(a_val - ROSSLER_PARAMS['a']) < 1e-8:
+            params_test['a'] = ROSSLER_PARAMS['a']
+            
         
         # Sincronizar con el nuevo a
         _, _, y_slave, t_slave, x_sinc = sincronizacion(
             y_sinc, times, params_test, time_sinc, keystream, nmax
         )
         # Descifrar
-        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc)
         imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
 
         # Calcular la distancia hamming
