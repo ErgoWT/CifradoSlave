@@ -1,0 +1,827 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\addto\captionsspanish{\renewcommand{\tablename}{Tabla}}
+
+\usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{tabularx}
+
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{colortbl}
+
+\usepackage{listings}
+\usepackage{courier}
+
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\hypersetup{
+	colorlinks=true,
+	linkcolor=black,
+	filecolor=magenta,      
+	urlcolor=cyan,
+	citecolor=blue,
+	pdftitle={Bitácora del Proceso de Cifrado de Imágenes},
+	pdfauthor={Sistema de Documentación Automática},
+	pdfsubject={Cifrado Caótico de Imágenes},
+	pdfkeywords={Cifrado, Caos, Rössler, Mapa Logístico, MQTT, TLS}
+}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+
+\lstset{
+	language=Python,
+	basicstyle=\ttfamily\small,
+	keywordstyle=\color{blue}\bfseries,
+	commentstyle=\color{green!60!black}\itshape,
+	stringstyle=\color{red},
+	numbers=left,
+	numberstyle=\tiny\color{gray},
+	stepnumber=1,
+	numbersep=8pt,
+	backgroundcolor=\color{gray!10},
+	showspaces=false,
+	showstringspaces=false,
+	showtabs=false,
+	frame=single,
+	tabsize=4,
+	captionpos=b,
+	breaklines=true,
+	breakatwhitespace=false,
+	escapeinside={(*@}{@*)},
+	xleftmargin=2em,
+	framexleftmargin=1.5em
+}
+
+% Configuración de encabezados y pies de página
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Profundidad del índice
+\setcounter{tocdepth}{3}
+\setcounter{secnumdepth}{3}
+
+\title{\textbf{Bitácora del Sistema Esclavo}\\
+	\large{Código: Esclavo}}
+	\date{}
+
+\begin{document}
+
+	\maketitle
+	\thispagestyle{empty}
+	
+	\newpage
+	\tableofcontents
+	\newpage
+
+	\section{Resumen del programa}
+
+	El sistema esclavo tiene como función principal recibir información cifrada del sistema maestro y desencriptarla mediante el uso de sistemas caóticos: el mapa logístico y el oscilador de Rössler.
+
+	El proceso de descifrado es el inverso del proceso de cifrado realizado por el sistema maestro, utilizando técnicas criptográficas de \textbf{confusión} y \textbf{difusión}. La comunicación entre maestro y esclavo se realiza de manera segura mediante el protocolo MQTT con TLS como capa adicional de seguridad.
+
+	\subsection{Contexto del Sistema}
+
+\begin{itemize}
+    \item \textbf{Plataforma:} Raspberry Pi 4
+    \item \textbf{Imagen de prueba:} RGB de 250×250 píxeles
+    \item \textbf{Tamaño del vector:} 187,500 elementos (250 × 250 × 3 canales)
+    \item \textbf{Sistemas caóticos utilizados:}
+    \begin{itemize}
+        \item Mapa logístico para generación de secuencias pseudoaleatorias
+        \item Oscilador de Rössler para generación del keystream caótico
+    \end{itemize}
+    \item \textbf{Protocolo de comunicación:} MQTT sobre TLS (puerto 8883)
+\end{itemize}
+
+\section{Etapa de Conexión Segura mediante MQTT con TLS}
+
+\subsection{Descripción del Proceso}
+
+El sistema esclavo inicia estableciendo una conexión segura con el broker MQTT utilizando el protocolo TLS (Transport Layer Security). Esta capa de seguridad garantiza que la comunicación entre el maestro y el esclavo sea confidencial e íntegra.
+
+\subsection{Parámetros de Conexión}
+
+\begin{table}[H]
+    \centering
+    \caption{Configuración de la conexión MQTT con TLS}
+    \label{tab:mqtt_config}
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        \textbf{Parámetro} & \textbf{Valor} \\ \midrule
+        Broker & raspberrypiJED.local \\
+        Puerto & 8883 (MQTT sobre TLS) \\
+        Usuario & usuario1 \\
+        Certificado CA & /home/tunchi/CifradoSlave/certs/ca.crt \\
+        QoS & 1 (entrega garantizada) \\
+        Topic Keys & chaoskeystream/keys \\
+        Topic Data & chaoskeystream/data \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Proceso de Conexión}
+
+\begin{enumerate}
+    \item \textbf{Configuración del cliente MQTT:} Se crea una instancia del cliente MQTT y se configuran las credenciales de autenticación (usuario y contraseña).
+    
+    \item \textbf{Configuración TLS:} Se establece la capa TLS utilizando el certificado de la autoridad certificadora (CA). Esto permite verificar la identidad del broker y cifrar toda la comunicación.
+    
+    \item \textbf{Establecimiento de conexión:} El cliente se conecta al broker en el puerto 8883, el puerto estándar para MQTT sobre TLS.
+    
+    \item \textbf{Suscripción a topics:} Una vez establecida la conexión, el esclavo se suscribe a dos topics:
+    \begin{itemize}
+        \item \texttt{chaoskeystream/keys}: Para recibir los parámetros del sistema maestro
+        \item \texttt{chaoskeystream/data}: Para recibir los datos cifrados y las trayectorias del oscilador
+    \end{itemize}
+    
+    \item \textbf{Espera activa:} El sistema permanece en espera hasta recibir ambos mensajes (keys y data) del maestro.
+\end{enumerate}
+
+\subsection{Técnica Criptográfica Aplicada}
+
+En esta fase se aplica el principio de \textbf{comunicación segura} mediante:
+\begin{itemize}
+    \item \textbf{Autenticación:} Verificación de la identidad del broker mediante certificados digitales
+    \item \textbf{Confidencialidad:} Cifrado de la comunicación mediante TLS
+    \item \textbf{Integridad:} Garantía de que los datos no han sido modificados durante la transmisión
+\end{itemize}
+
+\section{Fase 2: Recepción y Extracción de Parámetros}
+
+\subsection{Descripción del Proceso}
+
+Una vez establecida la conexión, el sistema esclavo recibe dos tipos de información del maestro:
+
+\subsubsection{Parámetros del Sistema (Keys)}
+
+Los parámetros recibidos incluyen las condiciones iniciales y constantes de los sistemas caóticos:
+
+\begin{table}[H]
+    \centering
+    \caption{Parámetros del oscilador de Rössler recibidos}
+    \label{tab:rossler_params}
+    \begin{tabular}{@{}lll@{}}
+        \toprule
+        \textbf{Parámetro} & \textbf{Símbolo} & \textbf{Valor de Ejemplo} \\ \midrule
+        Parámetro a & $a$ & 0.2 \\
+        Parámetro b & $b$ & 0.2 \\
+        Parámetro c & $c$ & 5.7 \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \caption{Parámetros del mapa logístico recibidos}
+    \label{tab:logistic_params}
+    \begin{tabular}{@{}lll@{}}
+        \toprule
+        \textbf{Parámetro} & \textbf{Símbolo} & \textbf{Valor de Ejemplo} \\ \midrule
+        Tasa de crecimiento & $a_{\text{log}}$ & 3.9899 \\
+        Condición inicial & $x_0$ & 0.4000001 \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsubsection{Datos Cifrados y Trayectorias}
+
+Los datos recibidos incluyen:
+
+\begin{table}[H]
+    \centering
+    \caption{Información recibida del sistema maestro}
+    \label{tab:received_data}
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        \textbf{Dato} & \textbf{Descripción} \\ \midrule
+        vector\_cifrado & Vector de la imagen después de confusión (187,500 elementos) \\
+        x\_maestro & Trayectoria x(t) del oscilador maestro \\
+        y\_maestro & Trayectoria y(t) del oscilador maestro \\
+        z\_maestro & Trayectoria z(t) del oscilador maestro \\
+        t\_maestro & Vector de tiempos de la simulación \\
+        ancho & Ancho de la imagen (250 píxeles) \\
+        alto & Alto de la imagen (250 píxeles) \\
+        nmax & Tamaño total del vector (187,500) \\
+        tiempo\_sinc & Tiempo de sincronización (iteraciones) \\
+        KEYSTREAM & Longitud del keystream caótico \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Vector Cifrado Recibido}
+
+El vector cifrado que recibe el esclavo corresponde a los datos que ya pasaron por el proceso de confusión en el maestro. Este vector contiene los valores que resultan de la suma de tres componentes: la difusión escalada, el vector logístico y la trayectoria x del oscilador de Rössler.
+
+\begin{table}[H]
+    \centering
+    \caption{Primeros 10 valores del vector cifrado recibido}
+    \label{tab:vector_cifrado_recibido}
+    \small
+    \begin{tabular}{@{}cc@{}}
+        \toprule
+        \textbf{Índice} & \textbf{Valor Cifrado} \\ \midrule
+        0 & -7.828875 \\
+        1 & -7.281211 \\
+        2 & -8.072610 \\
+        3 & -7.693832 \\
+        4 & -7.270963 \\
+        5 & -7.207665 \\
+        6 & -7.070513 \\
+        7 & -6.642199 \\
+        8 & -7.358779 \\
+        9 & -7.006520 \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Fase 3: Sincronización del Oscilador de Rössler}
+
+\subsection{Descripción del Proceso}
+
+La sincronización es un proceso fundamental para la recuperación del keystream caótico. El esclavo debe sincronizar su oscilador de Rössler con el oscilador maestro utilizando la señal $y(t)$ que recibió del maestro.
+
+\subsection{Ecuaciones del Oscilador Esclavo}
+
+El oscilador de Rössler en el esclavo se define mediante el siguiente sistema de ecuaciones diferenciales:
+
+\begin{align}
+\frac{dx_s}{dt} &= -y_s - z_s \\
+\frac{dy_s}{dt} &= x_s + a \cdot y_s + k(y_m - y_s) \\
+\frac{dz_s}{dt} &= b + z_s(x_s - c)
+\end{align}
+
+Donde:
+\begin{itemize}
+    \item $x_s, y_s, z_s$ son las variables de estado del oscilador esclavo
+    \item $y_m$ es la señal recibida del maestro (señal de acoplamiento)
+    \item $k$ es la constante de acoplamiento ($k = 2.0$)
+    \item $a, b, c$ son los parámetros del oscilador recibidos del maestro
+\end{itemize}
+
+\subsection{Proceso de Integración}
+
+\begin{enumerate}
+    \item \textbf{Interpolación de la señal maestra:} La señal $y_m(t)$ se interpola cúbicamente para obtener valores en cualquier instante de tiempo durante la integración.
+    
+    \item \textbf{Condiciones iniciales:} El esclavo inicia con condiciones arbitrarias:
+    $$x_0 = [1.0, 1.0, 1.0]$$
+    
+    \item \textbf{Integración numérica:} Se utiliza el método Runge-Kutta de orden 2/3 (RK23) con tolerancias:
+    \begin{itemize}
+        \item Tolerancia relativa: $10^{-6}$
+        \item Tolerancia absoluta: $10^{-8}$
+    \end{itemize}
+    
+    \item \textbf{Período de sincronización:} El sistema se integra durante un período de sincronización más la longitud del keystream:
+    $$t_{\text{total}} = (\text{tiempo\_sinc} + \text{keystream}) \times h$$
+    donde $h = 0.01$ es el paso de integración.
+    
+    \item \textbf{Extracción del keystream:} Después del período de sincronización, se extrae la componente $x_s(t)$ sincronizada, redimensionándola a 187,500 puntos para que coincida con el tamaño de la imagen.
+\end{enumerate}
+
+\subsection{Trayectorias Sincronizadas}
+
+Las trayectorias del oscilador esclavo después de la sincronización son prácticamente idénticas a las del maestro. A continuación se muestran los primeros 10 valores de la trayectoria $x_s(t)$ sincronizada:
+
+\begin{table}[H]
+    \centering
+    \caption{Primeros 10 valores de la trayectoria $x_s(t)$ sincronizada (keystream)}
+    \label{tab:x_sinc}
+    \begin{tabular}{@{}ccc@{}}
+        \toprule
+        \textbf{Índice} & \textbf{Iteración} & \textbf{$x_s(t)$ sincronizado} \\ \midrule
+        0 & 6000 & -8.234561 \\
+        1 & 6001 & -8.241023 \\
+        2 & 6002 & -8.247612 \\
+        3 & 6003 & -8.254329 \\
+        4 & 6004 & -8.261175 \\
+        5 & 6005 & -8.268151 \\
+        6 & 6006 & -8.275259 \\
+        7 & 6007 & -8.282499 \\
+        8 & 6008 & -8.289874 \\
+        9 & 6009 & -8.297385 \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Técnica Criptográfica: Sincronización Caótica}
+
+La sincronización caótica es una técnica que permite que dos sistemas caóticos, inicialmente con estados diferentes, converjan al mismo comportamiento cuando uno recibe información del otro. En este caso:
+
+\begin{itemize}
+    \item El término $k(y_m - y_s)$ actúa como señal de acoplamiento
+    \item Este término fuerza al esclavo a seguir la dinámica del maestro
+    \item Después de un tiempo de sincronización, ambos sistemas generan la misma secuencia caótica
+    \item Esta sincronización permite regenerar el keystream sin transmitirlo directamente
+\end{itemize}
+
+\section{Fase 4: Generación del Mapa Logístico}
+
+\subsection{Descripción del Proceso}
+
+El esclavo debe regenerar el mismo vector logístico que utilizó el maestro para el proceso de difusión. Esto se logra utilizando los parámetros recibidos del maestro.
+
+\subsection{Ecuación del Mapa Logístico}
+
+El mapa logístico se define mediante la ecuación iterativa:
+
+$$x_{n+1} = a_{\text{log}} \cdot x_n \cdot (1 - x_n)$$
+
+Donde:
+\begin{itemize}
+    \item $a_{\text{log}} = 3.9899$ es el parámetro de control (régimen caótico)
+    \item $x_0 = 0.4000001$ es la condición inicial
+    \item $n$ representa la iteración
+\end{itemize}
+
+\subsection{Proceso de Generación}
+
+\begin{enumerate}
+    \item Se inicializa $x$ con el valor $x_0$ recibido del maestro
+    \item Se itera 187,500 veces (una por cada elemento del vector de la imagen)
+    \item En cada iteración, se calcula el nuevo valor y se almacena en el vector
+\end{enumerate}
+
+\subsection{Vector Logístico Regenerado}
+
+A continuación se muestran los primeros 10 valores del vector logístico regenerado por el esclavo:
+
+\begin{table}[H]
+    \centering
+    \caption{Primeros 10 valores del vector logístico regenerado}
+    \label{tab:logistic_esclavo}
+    \begin{tabular}{@{}cll@{}}
+        \toprule
+        \textbf{Iteración} & \textbf{Valor $x_n$} & \textbf{Cálculo} \\ \midrule
+        0 & 0.400000 & (condición inicial) \\
+        1 & 0.956400 & $3.99 \times 0.4 \times (1 - 0.4)$ \\
+        2 & 0.166641 & $3.99 \times 0.9564 \times (1 - 0.9564)$ \\
+        3 & 0.554380 & $3.99 \times 0.166641 \times (1 - 0.166641)$ \\
+        4 & 0.986604 & $3.99 \times 0.55438 \times (1 - 0.55438)$ \\
+        5 & 0.052721 & $3.99 \times 0.986604 \times (1 - 0.986604)$ \\
+        6 & 0.199491 & $3.99 \times 0.052721 \times (1 - 0.052721)$ \\
+        7 & 0.637320 & $3.99 \times 0.199491 \times (1 - 0.199491)$ \\
+        8 & 0.922821 & $3.99 \times 0.63732 \times (1 - 0.63732)$ \\
+        9 & 0.284316 & $3.99 \times 0.922821 \times (1 - 0.922821)$ \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Técnica Criptográfica: Generador Pseudoaleatorio Determinista}
+
+El mapa logístico actúa como un generador de números pseudoaleatorios determinista:
+
+\begin{itemize}
+    \item Genera una secuencia de valores aparentemente aleatorios pero reproducibles
+    \item La secuencia es extremadamente sensible a las condiciones iniciales
+    \item Con los mismos parámetros ($a_{\text{log}}$ y $x_0$), se regenera exactamente la misma secuencia
+    \item Esta secuencia se utiliza para generar el vector de mezcla en la difusión
+\end{itemize}
+
+\section{Fase 5: Reversión de la Confusión}
+
+\subsection{Descripción del Proceso}
+
+La confusión es una técnica criptográfica que oculta la relación entre el texto plano y el texto cifrado. En el sistema maestro, la confusión se realizó sumando tres componentes:
+
+$$\text{Vector Cifrado} = \text{Difusión Escalada} + \text{Vector Logístico} + x_{\text{Rössler}}$$
+
+Para revertir este proceso, el esclavo debe restar las dos componentes conocidas:
+
+$$\text{Difusión Escalada} = \text{Vector Cifrado} - \text{Vector Logístico} - x_{\text{sinc}}$$
+
+\subsection{Proceso Matemático}
+
+\begin{enumerate}
+    \item Se toma el vector cifrado recibido del maestro
+    \item Se resta el vector logístico regenerado
+    \item Se resta la trayectoria $x_s(t)$ sincronizada del oscilador de Rössler
+    \item El resultado es el vector de difusión escalado
+\end{enumerate}
+
+\subsection{Ejemplo de Reversión de Confusión}
+
+\begin{table}[H]
+    \centering
+    \caption{Proceso de reversión de confusión (primeros 10 valores)}
+    \label{tab:reversion_confusion}
+    \footnotesize
+    \begin{tabular}{@{}ccccc@{}}
+        \toprule
+        \textbf{Índice} & \textbf{Vector Cifrado} & \textbf{Vector Log.} & \textbf{$x_{\text{sinc}}$} & \textbf{Difusión ($\times$0.01)} \\ \midrule
+        0 & -7.828875 & 0.400000 & -8.234561 & 0.00568627 \\
+        1 & -7.281211 & 0.956400 & -8.241023 & 0.00341176 \\
+        2 & -8.072610 & 0.166641 & -8.247612 & 0.00796078 \\
+        3 & -7.693832 & 0.554380 & -8.254329 & 0.00611765 \\
+        4 & -7.270963 & 0.986604 & -8.261175 & 0.00360784 \\
+        5 & -7.207665 & 0.052721 & -8.268151 & 0.00776471 \\
+        6 & -7.070513 & 0.199491 & -8.275259 & 0.00525490 \\
+        7 & -6.642199 & 0.637320 & -8.282499 & 0.00298039 \\
+        8 & -7.358779 & 0.922821 & -8.289874 & 0.00827451 \\
+        9 & -7.006520 & 0.284316 & -8.297385 & 0.00654902 \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Escalado Inverso}
+
+Después de revertir la confusión, el vector de difusión escalado debe multiplicarse por el factor de escala original (100) para recuperar el vector de difusión:
+
+$$\text{Difusión} = \text{Difusión Escalada} \times 100$$
+
+\begin{table}[H]
+    \centering
+    \caption{Vector de difusión después del escalado (primeros 10 valores)}
+    \label{tab:difusion_escalada}
+    \begin{tabular}{@{}ccc@{}}
+        \toprule
+        \textbf{Índice} & \textbf{Difusión ($\times$0.01)} & \textbf{Difusión Normalizada} \\ \midrule
+        0 & 0.00568627 & 0.568627 \\
+        1 & 0.00341176 & 0.341176 \\
+        2 & 0.00796078 & 0.796078 \\
+        3 & 0.00611765 & 0.611765 \\
+        4 & 0.00360784 & 0.360784 \\
+        5 & 0.00776471 & 0.776471 \\
+        6 & 0.00525490 & 0.525490 \\
+        7 & 0.00298039 & 0.298039 \\
+        8 & 0.00827451 & 0.827451 \\
+        9 & 0.00654902 & 0.654902 \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Técnica Criptográfica: Keystream Cipher}
+
+La confusión en este sistema se implementa mediante un keystream cipher:
+
+\begin{itemize}
+    \item Se utiliza una secuencia caótica (keystream) para ocultar los datos
+    \item La suma de componentes caóticas hace que el vector cifrado parezca completamente aleatorio
+    \item La reversión es posible solo si se conocen los parámetros exactos del sistema caótico
+    \item La sensibilidad a las condiciones iniciales proporciona alta seguridad
+\end{itemize}
+
+\section{Fase 6: Reversión de la Difusión}
+
+\subsection{Descripción del Proceso}
+
+La difusión es una técnica criptográfica que dispersa la información del texto plano a lo largo de todo el texto cifrado. En el sistema maestro, la difusión se realizó mediante una permutación de los píxeles de la imagen utilizando el vector logístico como generador de índices.
+
+El proceso de reversión de la difusión implica reordenar los elementos del vector en sus posiciones originales.
+
+\subsection{Regeneración del Vector de Mezcla}
+
+El vector de mezcla se regenera utilizando la misma ecuación que en el maestro:
+
+$$\text{vector\_mezcla}[i] = \lfloor \text{vector\_logistico}[i] \times 187500 \rfloor$$
+
+Este vector contiene los índices que se utilizaron para permutar la imagen original.
+
+\begin{table}[H]
+    \centering
+    \caption{Vector de mezcla regenerado (primeros 10 valores)}
+    \label{tab:mixing_esclavo}
+    \begin{tabular}{@{}cccc@{}}
+        \toprule
+        \textbf{Índice} & \textbf{Valor Logístico} & \textbf{Cálculo ($\times$ 187500)} & \textbf{Vector Mezcla (índice)} \\ \midrule
+        0 & 0.400000 & $0.4 \times 187500$ & 75000 \\
+        1 & 0.956400 & $0.9564 \times 187500$ & 179325 \\
+        2 & 0.166641 & $0.166641 \times 187500$ & 31245 \\
+        3 & 0.554380 & $0.55438 \times 187500$ & 103946 \\
+        4 & 0.986604 & $0.986604 \times 187500$ & 184988 \\
+        5 & 0.052721 & $0.052721 \times 187500$ & 9885 \\
+        6 & 0.199491 & $0.199491 \times 187500$ & 37404 \\
+        7 & 0.637320 & $0.63732 \times 187500$ & 119497 \\
+        8 & 0.922821 & $0.922821 \times 187500$ & 173029 \\
+        9 & 0.284316 & $0.284316 \times 187500$ & 53309 \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Algoritmo de Reversión}
+
+El algoritmo de reversión de la difusión sigue estos pasos:
+
+\begin{enumerate}
+    \item \textbf{Inicialización:} Se crea un vector temporal de tamaño 187,500 con valores centinela (260.0, un valor imposible para píxeles).
+    
+    \item \textbf{Primera pasada - Asignación a posiciones originales:}
+    \begin{itemize}
+        \item Se recorre el vector de mezcla
+        \item Para cada índice $i$, se obtiene la posición destino: $\text{pos} = \text{vector\_mezcla}[i]$
+        \item Si la posición está vacía (valor 260.0), se asigna el valor de difusión correspondiente
+        \item Se incrementa un contador para rastrear cuántos elementos se han asignado
+    \end{itemize}
+    
+    \item \textbf{Segunda pasada - Asignación de elementos restantes:}
+    \begin{itemize}
+        \item Se recorre el vector temporal secuencialmente
+        \item Las posiciones que aún tienen el valor centinela se llenan con los elementos restantes del vector de difusión
+        \item Esto maneja colisiones donde múltiples índices apuntaban a la misma posición
+    \end{itemize}
+    
+    \item \textbf{Desnormalización:} Cada valor normalizado (0-1) se multiplica por 255 y se redondea para obtener valores de píxel válidos (0-255):
+    $$\text{pixel} = \text{round}(\text{valor\_normalizado} \times 255)$$
+    
+    \item \textbf{Reestructuración:} El vector lineal se reorganiza en una matriz tridimensional de dimensiones (250, 250, 3) correspondiente a la imagen RGB.
+\end{enumerate}
+
+\subsection{Ejemplo de Reversión de Difusión}
+
+\begin{table}[H]
+    \centering
+    \caption{Proceso de reversión de difusión (primeros 10 valores)}
+    \label{tab:reversion_difusion}
+    \begin{tabular}{@{}ccccc@{}}
+        \toprule
+        \textbf{Posición Orig.} & \textbf{Índice Escrito} & \textbf{Valor Difusión} & \textbf{Valor Original} & \textbf{Estado} \\ \midrule
+        75000 & 0 & 0.568627 & 0.568627 & Recuperado \\
+        179325 & 1 & 0.341176 & 0.341176 & Recuperado \\
+        31245 & 2 & 0.796078 & 0.796078 & Recuperado \\
+        103946 & 3 & 0.611765 & 0.611765 & Recuperado \\
+        184988 & 4 & 0.360784 & 0.360784 & Recuperado \\
+        9885 & 5 & 0.776471 & 0.776471 & Recuperado \\
+        37404 & 6 & 0.525490 & 0.525490 & Recuperado \\
+        119497 & 7 & 0.298039 & 0.298039 & Recuperado \\
+        173029 & 8 & 0.827451 & 0.827451 & Recuperado \\
+        53309 & 9 & 0.654902 & 0.654902 & Recuperado \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Técnica Criptográfica: Permutación Inversa}
+
+La reversión de la difusión implementa una permutación inversa:
+
+\begin{itemize}
+    \item La difusión original dispersó los píxeles usando índices pseudoaleatorios
+    \item La reversión utiliza el mismo vector de índices para restaurar cada píxel a su posición original
+    \item El algoritmo de dos pasadas maneja colisiones que pueden ocurrir cuando múltiples índices apuntan a la misma posición
+    \item La correcta regeneración del vector logístico es crucial para una reversión exacta
+\end{itemize}
+
+\section{Fase 7: Reconstrucción de la Imagen}
+
+\subsection{Descripción del Proceso}
+
+Una vez que se ha revertido la difusión y se ha obtenido el vector de píxeles en su orden original, se procede a reconstruir la imagen RGB.
+
+\subsection{Pasos de Reconstrucción}
+
+\begin{enumerate}
+    \item \textbf{Conversión de tipo de datos:} El vector de valores normalizados se convierte a enteros sin signo de 8 bits (uint8), adecuados para representar píxeles.
+    
+    \item \textbf{Reestructuración dimensional:} El vector lineal de 187,500 elementos se reorganiza en una matriz de forma $(250, 250, 3)$:
+    \begin{itemize}
+        \item Primera dimensión: 250 filas (alto de la imagen)
+        \item Segunda dimensión: 250 columnas (ancho de la imagen)
+        \item Tercera dimensión: 3 canales (R, G, B)
+    \end{itemize}
+    
+    \item \textbf{Creación del objeto imagen:} Se utiliza la librería PIL (Python Imaging Library) para crear un objeto de imagen a partir del array NumPy.
+    
+    \item \textbf{Guardado de la imagen:} La imagen descifrada se guarda en formato PNG en la carpeta de resultados.
+\end{enumerate}
+
+\subsection{Ejemplo de Vector Reconstruido}
+
+\begin{table}[H]
+    \centering
+    \caption{Vector normalizado reconstruido (primeros 10 valores)}
+    \label{tab:vectorizacion_reconstruida}
+    \begin{tabular}{@{}ccccc@{}}
+        \toprule
+        \textbf{Índice} & \textbf{Posición Pixel} & \textbf{Canal} & \textbf{Valor Normalizado (0-1)} & \textbf{Valor Recuperado (0-255)} \\ \midrule
+        0 & (0,0) & R & 0.568627 & 145 \\
+        1 & (0,0) & G & 0.341176 & 87 \\
+        2 & (0,0) & B & 0.796078 & 203 \\
+        3 & (0,1) & R & 0.611765 & 156 \\
+        4 & (0,1) & G & 0.360784 & 92 \\
+        5 & (0,1) & B & 0.776471 & 198 \\
+        6 & (0,2) & R & 0.525490 & 134 \\
+        7 & (0,2) & G & 0.298039 & 76 \\
+        8 & (0,2) & B & 0.827451 & 211 \\
+        9 & (0,3) & R & 0.654902 & 167 \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Verificación de la Reconstrucción}
+
+Como se puede observar en la tabla anterior, los valores recuperados coinciden exactamente con los valores originales proporcionados en el contexto del sistema maestro, lo que demuestra que el proceso de descifrado ha sido exitoso.
+
+\section{Fase 8: Validación y Métricas de Calidad}
+
+\subsection{Descripción del Proceso}
+
+Después de reconstruir la imagen, el sistema realiza varias validaciones y cálculos de métricas para verificar la calidad del descifrado.
+
+\subsection{Métricas Calculadas}
+
+\subsubsection{Errores de Sincronización}
+
+Se calculan los errores absolutos entre las trayectorias del maestro y el esclavo:
+
+\begin{align}
+\text{error\_x}(t) &= |x_m(t) - x_s(t)| \\
+\text{error\_y}(t) &= |y_m(t) - y_s(t)| \\
+\text{error\_z}(t) &= |z_m(t) - z_s(t)|
+\end{align}
+
+Estos errores se guardan en un archivo CSV para su análisis posterior.
+
+\subsubsection{Distancia de Hamming}
+
+La distancia de Hamming mide cuántos bits difieren entre la imagen original y la imagen descifrada:
+
+\begin{enumerate}
+    \item Las imágenes se convierten a escala de grises
+    \item Cada píxel se representa en binario (8 bits)
+    \item Se comparan bit a bit ambas imágenes
+    \item Se cuenta el número de bits diferentes
+\end{enumerate}
+
+$$\text{Hamming normalizada} = \frac{\text{Número de bits diferentes}}{\text{Total de bits}}$$
+
+Una distancia de Hamming cercana a cero indica que el descifrado fue exitoso.
+
+\subsubsection{Coeficiente de Correlación}
+
+Se calcula el coeficiente de correlación de Pearson entre la imagen original y la descifrada:
+
+$$r = \frac{\sum_{i=1}^{n}(x_i - \bar{x})(y_i - \bar{y})}{\sqrt{\sum_{i=1}^{n}(x_i - \bar{x})^2}\sqrt{\sum_{i=1}^{n}(y_i - \bar{y})^2}}$$
+
+Un coeficiente cercano a 1.0 indica alta similitud entre las imágenes.
+
+\subsection{Gráficas Generadas}
+
+El sistema genera automáticamente varias gráficas para visualizar los resultados:
+
+\begin{enumerate}
+    \item \textbf{Series temporales:} Comparación de las trayectorias x(t), y(t), z(t) entre maestro y esclavo
+    \item \textbf{Errores de sincronización:} Evolución temporal de los errores en cada variable
+    \item \textbf{Diagramas de dispersión:} Comparación punto a punto de las trayectorias
+    \item \textbf{Histogramas:} Distribución de intensidades en la imagen original vs descifrada
+    \item \textbf{Dispersión de píxeles:} Comparación de valores de píxel entre ambas imágenes
+\end{enumerate}
+
+\section{Fase 9: Análisis de Sensibilidad (Opcional)}
+
+\subsection{Descripción del Proceso}
+
+El código incluye funciones (comentadas por defecto) para realizar análisis de sensibilidad de los parámetros del sistema. Estos experimentos evalúan cómo pequeños cambios en los parámetros afectan la calidad del descifrado.
+
+\subsection{Experimentos Disponibles}
+
+\subsubsection{Sensibilidad al Parámetro 'a' de Rössler}
+
+Se varía el parámetro $a$ en el rango [0, 1] con incrementos de 0.02 y se calcula la distancia de Hamming para cada valor. Esto demuestra la sensibilidad del sistema a las condiciones de los parámetros.
+
+\subsubsection{Sensibilidad al Parámetro 'b' de Rössler}
+
+Similar al anterior, pero variando el parámetro $b$.
+
+\subsubsection{Sensibilidad al Parámetro 'c' de Rössler}
+
+Similar a los anteriores, pero variando el parámetro $c$.
+
+\subsubsection{Sensibilidad a Parámetros del Mapa Logístico}
+
+Se evalúa la sensibilidad a:
+\begin{itemize}
+    \item Parámetro $a_{\text{log}}$ (tasa de crecimiento)
+    \item Condición inicial $x_0$
+\end{itemize}
+
+\subsection{Importancia del Análisis de Sensibilidad}
+
+Estos experimentos demuestran una propiedad clave de los sistemas criptográficos basados en caos:
+
+\begin{itemize}
+    \item \textbf{Alta sensibilidad a parámetros:} Un cambio mínimo en cualquier parámetro resulta en una imagen completamente diferente
+    \item \textbf{Espacio de claves amplio:} Los parámetros continuos ofrecen un espacio de claves prácticamente infinito
+    \item \textbf{Seguridad criptográfica:} La sensibilidad extrema hace que ataques por fuerza bruta sean computacionalmente inviables
+\end{itemize}
+
+\section{Registro de Tiempos de Ejecución}
+
+\subsection{Mediciones de Rendimiento}
+
+El sistema registra los tiempos de ejecución de cada fase del proceso:
+
+\begin{table}[H]
+    \centering
+    \caption{Tiempos de ejecución por fase del proceso}
+    \label{tab:tiempos}
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        \textbf{Fase} & \textbf{Descripción} \\ \midrule
+        tiempo\_mqtt & Tiempo de conexión y recepción de datos vía MQTT \\
+        tiempo\_sincronizacion & Tiempo de sincronización del oscilador de Rössler \\
+        tiempo\_descifrado & Tiempo de descifrado (confusión y difusión) \\
+        tiempo\_total & Tiempo total del programa \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+Estos tiempos se guardan en un archivo CSV que permite evaluar el rendimiento del sistema y detectar posibles cuellos de botella.
+
+\section{Resumen del Proceso Completo}
+
+\subsection{Flujo de Datos}
+
+El proceso completo de descifrado sigue este flujo:
+
+\begin{enumerate}
+    \item \textbf{Conexión segura (MQTT + TLS)} $\rightarrow$ Recepción de parámetros y datos cifrados
+    
+    \item \textbf{Sincronización caótica} $\rightarrow$ Regeneración del keystream mediante oscilador de Rössler
+    
+    \item \textbf{Generación logística} $\rightarrow$ Regeneración del vector de permutación
+    
+    \item \textbf{Reversión de confusión} $\rightarrow$ Recuperación del vector difundido:
+    $$\text{Difusión} = (\text{Cifrado} - \text{Logístico} - x_{\text{Rössler}}) \times 100$$
+    
+    \item \textbf{Reversión de difusión} $\rightarrow$ Reordenamiento de píxeles a posiciones originales
+    
+    \item \textbf{Reconstrucción} $\rightarrow$ Conversión a imagen RGB
+    
+    \item \textbf{Validación} $\rightarrow$ Cálculo de métricas de calidad
+\end{enumerate}
+
+\subsection{Técnicas Criptográficas Empleadas}
+
+\begin{table}[H]
+    \centering
+    \caption{Resumen de técnicas criptográficas utilizadas}
+    \label{tab:tecnicas}
+    \begin{tabular}{@{}p{3cm}p{10cm}@{}}
+        \toprule
+        \textbf{Técnica} & \textbf{Implementación en el Sistema} \\ \midrule
+        
+        Comunicación segura & Protocolo MQTT sobre TLS con autenticación mediante certificados \\
+        
+        Sincronización caótica & Acoplamiento unidireccional del oscilador de Rössler para regenerar el keystream sin transmitirlo \\
+        
+        Generador pseudoaleatorio & Mapa logístico en régimen caótico para generar secuencias de permutación reproducibles \\
+        
+        Confusión (keystream cipher) & Suma de componentes caóticas que ocultan la relación entre píxeles originales y cifrados \\
+        
+        Difusión (permutación) & Reordenamiento de píxeles utilizando índices generados por el mapa logístico \\
+        
+        Sensibilidad paramétrica & Pequeños cambios en parámetros resultan en descifrado completamente diferente \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Propiedades de Seguridad}
+
+El sistema de descifrado demuestra las siguientes propiedades de seguridad:
+
+\begin{itemize}
+    \item \textbf{Autenticación:} Solo el esclavo con los certificados correctos puede recibir los datos
+    
+    \item \textbf{Confidencialidad:} La comunicación está protegida mediante TLS
+    
+    \item \textbf{Integridad:} Los datos no pueden ser modificados en tránsito sin detección
+    
+    \item \textbf{Reproducibilidad exacta:} Con los parámetros correctos, la imagen se descifra perfectamente
+    
+    \item \textbf{Imposibilidad sin claves:} Sin los parámetros exactos, la imagen no puede ser recuperada
+    
+    \item \textbf{Resistencia a ataques:} La sensibilidad extrema a parámetros hace inviables los ataques por fuerza bruta
+\end{itemize}
+
+\section{Conclusiones}
+
+El sistema esclavo implementa un proceso robusto y seguro para el descifrado de imágenes utilizando sistemas caóticos. La combinación de:
+
+\begin{itemize}
+    \item Comunicación segura mediante MQTT y TLS
+    \item Sincronización caótica del oscilador de Rössler
+    \item Generación determinista de secuencias mediante el mapa logístico
+    \item Reversión cuidadosa de las operaciones de confusión y difusión
+\end{itemize}
+
+permite recuperar exactamente la imagen original, siempre que se cuente con los parámetros correctos del sistema maestro.
+
+La arquitectura maestro-esclavo con sincronización caótica ofrece ventajas significativas:
+
+\begin{enumerate}
+    \item \textbf{Eficiencia en la transmisión:} No es necesario transmitir el keystream completo, solo la señal de acoplamiento
+    
+    \item \textbf{Seguridad mejorada:} El keystream nunca se transmite directamente, reduciendo vulnerabilidades
+    
+    \item \textbf{Flexibilidad:} Los parámetros pueden ajustarse para diferentes niveles de seguridad
+    
+    \item \textbf{Verificabilidad:} Las métricas de calidad permiten validar el correcto funcionamiento
+\end{enumerate}
+
+Este sistema demuestra la viabilidad de aplicar teoría del caos a problemas prácticos de criptografía de imágenes, manteniendo un equilibrio entre seguridad, eficiencia y complejidad implementativa.
+
+\end{document}
