@@ -146,9 +146,9 @@ def sincronizacion(y_maestro, times, ROSSLER_PARAMS, time_sinc, keystream, nmax)
                 ROSSLER_PARAMS['b'], 
                 ROSSLER_PARAMS['c'], 
                 K),
-        rtol = 1e-6,
-        atol = 1e-8,
-        method='RK23'
+        rtol = 1e-7,
+        atol = 1e-7,
+        method='RK45'
     )
     
     x_esclavo = sol_esclavo.y[0]
