@@ -857,7 +857,7 @@ Esta sección documenta en detalle cada uno de los análisis visuales y cuantita
 
 \textbf{Objetivo:} Comparar la distribución estadística de los valores de píxel de la imagen cifrada frente a la imagen descifrada, para verificar que el proceso de descifrado ha restaurado la distribución natural de la imagen original.
 
-\textbf{Generación:} Se calculan histogramas de 256 bins sobre los valores de intensidad (rango $[0, 255]$) del vector cifrado y del vector descifrado. Ambos vectores corresponden al arreglo aplanado completo de la imagen RGB de $250 \times 250$ píxeles ($250 \times 250 \times 3 = 187{,}500$ valores escalares, uno por canal y por píxel). Los histogramas se grafican en subplots comparativos; se analiza el vector completo sin separar por canal.
+\textbf{Generación:} Se calculan histogramas de 256 bins sobre los valores de intensidad (rango $[0, 255]$) del vector cifrado y del vector descifrado. Ambos vectores corresponden al arreglo aplanado completo de la imagen RGB de $250 \times 250$ píxeles: $250 \times 250 \times 3 = 187{,}500$ valores escalares en total (3 canales por píxel: R, G y B), no 62{,}500 píxeles únicos. Los histogramas se grafican en subplots comparativos; se analiza el vector completo sin separar por canal.
 
 \textbf{Resultado esperado:} El histograma de la imagen cifrada presenta una distribución \emph{aproximadamente uniforme} (efecto del cifrado caótico), mientras que el histograma de la imagen descifrada exhibe la distribución característica de la imagen original (concentrada en ciertos rangos de intensidad, con picos y valles propios de la escena fotografiada).
 
@@ -881,7 +881,7 @@ Esta sección documenta en detalle cada uno de los análisis visuales y cuantita
 \[
     d_H = \frac{1}{N} \sum_{i=1}^{N} \mathbb{1}\left[b_i^\text{correcto} \neq b_i^\text{perturbado}\right]
 \]
-donde $b_i$ son los bits del vector aplanado de píxeles (187{,}500 valores uint8, es decir $N = 187{,}500 \times 8 = 1{,}500{,}000$ bits en total). Los resultados se grafican como curvas $d_H$ vs perturbación para cada parámetro.
+donde $b_i$ son los bits del vector aplanado de píxeles: se tienen 187{,}500 valores uint8 (enteros sin signo de 8 bits) y cada valor contribuye 8 bits, dando un total de $N = 187{,}500 \times 8 = 1{,}500{,}000$ bits comparados. Los resultados se grafican como curvas $d_H$ vs perturbación para cada parámetro.
 
 \textbf{Parámetros nominales del maestro:} $a = 0.2$, $b = 0.2$, $c = 5.7$.
 
