@@ -6,6 +6,7 @@
 \usepackage{lmodern}
 
 \usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\setlength{\headheight}{15.36pt}
 
 \usepackage{amsmath}
 \usepackage{amsfonts}
@@ -25,7 +26,6 @@
 \usepackage{courier}
 
 \usepackage{float}
-\usepackage{booktabs}
 \usepackage{hyperref}
 \hypersetup{
 	colorlinks=true,
@@ -38,7 +38,6 @@
 	pdfsubject={Cifrado Caótico de Imágenes},
 	pdfkeywords={Cifrado, Caos, Rössler, Mapa Logístico, MQTT, TLS}
 }
-\usepackage{geometry}
 \usepackage{fancyhdr}
 \usepackage{titlesec}
 \usepackage{enumitem}
@@ -597,9 +596,10 @@ Una vez que se ha revertido la difusión y se ha obtenido el vector de píxeles 
     \centering
     \caption{Vector normalizado reconstruido (primeros 10 valores)}
     \label{tab:vectorizacion_reconstruida}
+    \footnotesize
     \begin{tabular}{@{}ccccc@{}}
         \toprule
-        \textbf{Índice} & \textbf{Posición Pixel} & \textbf{Canal} & \textbf{Valor Normalizado (0-1)} & \textbf{Valor Recuperado (0-255)} \\ \midrule
+        \textbf{Índice} & \textbf{Pos. Pixel} & \textbf{Canal} & \textbf{Valor Norm. (0-1)} & \textbf{Valor Recup. (0-255)} \\ \midrule
         0 & (0,0) & R & 0.568627 & 145 \\
         1 & (0,0) & G & 0.341176 & 87 \\
         2 & (0,0) & B & 0.796078 & 203 \\
@@ -761,7 +761,7 @@ El proceso completo de descifrado sigue este flujo:
     \centering
     \caption{Resumen de técnicas criptográficas utilizadas}
     \label{tab:tecnicas}
-    \begin{tabular}{@{}p{3cm}p{10cm}@{}}
+    \begin{tabularx}{\textwidth}{@{}p{3cm}X@{}}
         \toprule
         \textbf{Técnica} & \textbf{Implementación en el Sistema} \\ \midrule
         
@@ -776,7 +776,7 @@ El proceso completo de descifrado sigue este flujo:
         Difusión (permutación) & Reordenamiento de píxeles utilizando índices generados por el mapa logístico \\
         
         Sensibilidad paramétrica & Pequeños cambios en parámetros resultan en descifrado completamente diferente \\ \bottomrule
-    \end{tabular}
+    \end{tabularx}
 \end{table}
 
 \subsection{Propiedades de Seguridad}
@@ -805,7 +805,9 @@ Esta sección documenta en detalle cada uno de los análisis visuales y cuantita
 
 \textbf{Objetivo:} Comparar visualmente la evolución temporal de las variables $x$, $y$ y $z$ del sistema maestro frente a las del sistema esclavo, verificando que la sincronización caótica se logra correctamente.
 
+\begin{sloppypar}
 \textbf{Generación:} La función integra el sistema esclavo de Rössler mediante \texttt{solve\_ivp} con el método RK23 (\texttt{rtol=1e-6}, \texttt{atol=1e-8}) usando la señal de acoplamiento $y_\text{maestro}(t)$. Los vectores de solución del maestro (\texttt{x\_maestro}, \texttt{y\_maestro}, \texttt{z\_maestro}) y del esclavo se grafican en tres subplots superpuestos sobre el eje de tiempo.
+\end{sloppypar}
 
 \textbf{Resultado esperado:} Durante la fase transitoria (primeras $t_\text{sinc} = 6000$ muestras con $h = 0.01$, es decir $t \in [0, 60]$), las trayectorias divergen. A partir del tiempo de sincronización, las curvas del maestro y el esclavo se superponen visualmente de forma indistinguible.
 
