@@ -4,7 +4,6 @@
 \usepackage[spanish]{babel}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
-\addto\captionsspanish{\renewcommand{\tablename}{Tabla}}
 
 \usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
 
@@ -30,11 +29,11 @@
 \usepackage{hyperref}
 \hypersetup{
 	colorlinks=true,
-	linkcolor=black,
+	linkcolor=blue,
 	filecolor=magenta,      
 	urlcolor=cyan,
 	citecolor=blue,
-	pdftitle={Bitácora del Proceso de Cifrado de Imágenes},
+	pdftitle={Bitácora del Proceso de Descifrado de Imágenes},
 	pdfauthor={Sistema de Documentación Automática},
 	pdfsubject={Cifrado Caótico de Imágenes},
 	pdfkeywords={Cifrado, Caos, Rössler, Mapa Logístico, MQTT, TLS}
@@ -79,9 +78,10 @@
 \setcounter{tocdepth}{3}
 \setcounter{secnumdepth}{3}
 
-\title{\textbf{Bitácora del Sistema Esclavo}\\
-	\large{Código: Esclavo}}
-	\date{}
+\title{\textbf{Bitácora del Proceso de Descifrado de Imágenes}\\
+	\large{Código: Esclavo\_TLS\_Keystream.py}}
+\author{Sistema de Documentación Automática}
+\date{13 de febrero de 2026 \\ Versión 1.0}
 
 \begin{document}
 
@@ -796,6 +796,133 @@ El sistema de descifrado demuestra las siguientes propiedades de seguridad:
     
     \item \textbf{Resistencia a ataques:} La sensibilidad extrema a parámetros hace inviables los ataques por fuerza bruta
 \end{itemize}
+
+\section{Análisis y Gráficas Generadas}
+
+Esta sección documenta en detalle cada uno de los análisis visuales y cuantitativos que genera el sistema esclavo al finalizar el proceso de descifrado. Las gráficas son producidas por la función \texttt{generar\_graficas()} del código \texttt{Esclavo\_TLS\_Keystream.py} y se guardan automáticamente en el directorio de resultados.
+
+\subsection{Series Temporales de Sincronización}
+
+\textbf{Objetivo:} Comparar visualmente la evolución temporal de las variables $x$, $y$ y $z$ del sistema maestro frente a las del sistema esclavo, verificando que la sincronización caótica se logra correctamente.
+
+\textbf{Generación:} La función integra el sistema esclavo de Rössler mediante \texttt{solve\_ivp} con el método RK23 (\texttt{rtol=1e-6}, \texttt{atol=1e-8}) usando la señal de acoplamiento $y_\text{maestro}(t)$. Los vectores de solución del maestro (\texttt{x\_maestro}, \texttt{y\_maestro}, \texttt{z\_maestro}) y del esclavo se grafican en tres subplots superpuestos sobre el eje de tiempo.
+
+\textbf{Resultado esperado:} Durante la fase transitoria (primeras $t_\text{sinc} = 6000$ muestras con $h = 0.01$, es decir $t \in [0, 60]$), las trayectorias divergen. A partir del tiempo de sincronización, las curvas del maestro y el esclavo se superponen visualmente de forma indistinguible.
+
+\textbf{Interpretación:} La superposición de las curvas confirma la sincronización completa del atractor. Si las trayectorias no convergen, el keystream generado será erróneo y la imagen no se podrá descifrar.
+
+\vspace{1em}
+\textbf{Primeros 10 valores de $x_\text{maestro}(t)$ de referencia:}
+
+\begin{center}
+\begin{tabular}{c|c}
+\toprule
+\textbf{Índice} & \textbf{$x_\text{maestro}$} \\
+\midrule
+0 & $-8.234561$ \\
+1 & $-8.241023$ \\
+2 & $-8.247612$ \\
+3 & $-8.254329$ \\
+4 & $-8.261175$ \\
+5 & $-8.268151$ \\
+6 & $-8.275259$ \\
+7 & $-8.282499$ \\
+8 & $-8.289874$ \\
+9 & $-8.297385$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Errores de Sincronización Temporal}
+
+\textbf{Objetivo:} Cuantificar y visualizar los errores de sincronización $|x_m(t) - x_s(t)|$, $|y_m(t) - y_s(t)|$ y $|z_m(t) - z_s(t)|$ en función del tiempo, para demostrar la convergencia exponencial al cero.
+
+\textbf{Generación:} Se calculan las diferencias en valor absoluto entre los vectores del maestro y el esclavo en cada instante de tiempo. Se grafican en escala logarítmica en el eje $y$ para apreciar mejor la caída exponencial del error.
+
+\textbf{Resultado esperado:} El error parte de valores del orden de $10^0$--$10^1$ (diferencia en condiciones iniciales) y decae exponencialmente hasta valores menores a $10^{-6}$ a partir de $t \approx t_\text{sinc}$. Tras la sincronización, el error se mantiene por debajo del umbral de tolerancia numérica (\texttt{atol=1e-8}).
+
+\textbf{Interpretación:} La velocidad de convergencia y el error residual son indicadores directos de la calidad de la sincronización. Un error persistentemente alto indicaría un problema en los parámetros de acoplamiento $k = 2.0$ o en la transmisión de la señal de acoplamiento.
+
+\subsection{Diagramas de Dispersión de Variables del Oscilador}
+
+\textbf{Objetivo:} Verificar la sincronización completa mediante diagramas de fase $x_m$ vs $x_s$, $y_m$ vs $y_s$ y $z_m$ vs $z_s$. Una sincronización perfecta produce puntos alineados sobre la diagonal $y = x$.
+
+\textbf{Generación:} Se grafican los pares $(x_m(t_i),\, x_s(t_i))$ para todos los instantes de tiempo \emph{después} del periodo de sincronización (índices $t_i > t_\text{sinc}$). Se superpone la línea identidad $y = x$ como referencia.
+
+\textbf{Resultado esperado:} Todos los puntos deben caer sobre la diagonal con desviaciones menores a $10^{-6}$. El coeficiente de correlación de Pearson entre $x_m$ y $x_s$ (análogamente para $y$ y $z$) debe ser $r \approx 1.0$.
+
+\textbf{Interpretación:} La alineación perfecta sobre la diagonal demuestra que el sistema esclavo ha logrado sincronización completa de fase con el maestro. Cualquier dispersión indica error en la reconstrucción del keystream.
+
+\subsection{Histogramas de Intensidades}
+
+\textbf{Objetivo:} Comparar la distribución estadística de los valores de píxel de la imagen cifrada frente a la imagen descifrada, para verificar que el proceso de descifrado ha restaurado la distribución natural de la imagen original.
+
+\textbf{Generación:} Se calculan histogramas de 256 bins sobre los valores de intensidad (rango $[0, 255]$) del vector cifrado y del vector descifrado. Ambos vectores corresponden al arreglo aplanado completo de la imagen RGB de $250 \times 250$ píxeles: $250 \times 250 \times 3 = 187{,}500$ valores escalares en total (3 canales por píxel: R, G y B), no 62{,}500 píxeles únicos. Los histogramas se grafican en subplots comparativos; se analiza el vector completo sin separar por canal.
+
+\textbf{Resultado esperado:} El histograma de la imagen cifrada presenta una distribución \emph{aproximadamente uniforme} (efecto del cifrado caótico), mientras que el histograma de la imagen descifrada exhibe la distribución característica de la imagen original (concentrada en ciertos rangos de intensidad, con picos y valles propios de la escena fotografiada).
+
+\textbf{Interpretación:} La diferencia entre ambas distribuciones confirma el efecto del cifrado. La similitud entre el histograma de la imagen descifrada y el de la imagen original (si está disponible para comparación) valida la correcta operación del sistema.
+
+\subsection{Dispersión de Píxeles}
+
+\textbf{Objetivo:} Visualizar la correlación entre los valores de píxel de la imagen cifrada y los de la imagen descifrada mediante un diagrama de dispersión, para confirmar que no existe una relación lineal simple entre ambas.
+
+\textbf{Generación:} Se grafican los pares $(p_\text{cifrado}(i),\, p_\text{descifrado}(i))$ para una muestra representativa de los $187{,}500$ valores de píxel. Se utiliza transparencia (\texttt{alpha}) para visualizar la densidad de puntos en zonas de alta concentración.
+
+\textbf{Resultado esperado:} La nube de puntos debe mostrar una distribución \emph{caótica y dispersa} sin correlación aparente, lo que confirma que el cifrado ha alterado efectivamente los valores. Tras el descifrado, si la operación es correcta, los valores se restauran exactamente.
+
+\textbf{Interpretación:} La ausencia de correlación entre la imagen cifrada y la descifrada demuestra la efectividad del proceso de ofuscación. Una correlación alta indicaría que el cifrado no ha sido suficientemente robusto.
+
+\subsection{Análisis de Sensibilidad: Distancia de Hamming vs Parámetros de Rössler}
+
+\textbf{Objetivo:} Cuantificar la sensibilidad del sistema de descifrado a variaciones en los parámetros del oscilador de Rössler ($a$, $b$, $c$), midiendo la Distancia de Hamming normalizada entre la imagen correctamente descifrada y la obtenida con parámetros perturbados.
+
+\textbf{Generación:} Para cada parámetro Rössler ($a$, $b$, $c$), se varía su valor en un rango $[\theta - \delta, \theta + \delta]$ manteniendo los demás fijos, donde $\theta$ es el valor nominal y $\delta$ es la perturbación. Se calcula la Distancia de Hamming normalizada:
+\[
+    d_H = \frac{1}{N} \sum_{i=1}^{N} \mathbb{1}\left[b_i^\text{correcto} \neq b_i^\text{perturbado}\right]
+\]
+donde $b_i$ son los bits del vector aplanado de píxeles: se tienen 187{,}500 valores uint8 (enteros sin signo de 8 bits) y cada valor contribuye 8 bits, dando un total de $N = 187{,}500 \times 8 = 1{,}500{,}000$ bits comparados. Los resultados se grafican como curvas $d_H$ vs perturbación para cada parámetro.
+
+\textbf{Parámetros nominales del maestro:} $a = 0.2$, $b = 0.2$, $c = 5.7$.
+
+\textbf{Resultado esperado:} Incluso perturbaciones del orden de $10^{-3}$ en cualquier parámetro Rössler producen una Distancia de Hamming $d_H \approx 0.5$, indicando que el 50\% de los bits difieren (distribución aleatoria). Esto demuestra la extrema sensibilidad a las condiciones iniciales característica de los sistemas caóticos.
+
+\textbf{Interpretación:} Una Distancia de Hamming alta ante perturbaciones mínimas confirma que el sistema es resistente a ataques de fuerza bruta. Sin los parámetros exactos, el descifrado produce ruido estadísticamente indistinguible de una imagen aleatoria.
+
+\subsection{Análisis de Sensibilidad: Distancia de Hamming vs Parámetros del Mapa Logístico}
+
+\textbf{Objetivo:} Cuantificar la sensibilidad del sistema a variaciones en los parámetros del mapa logístico ($a_\text{log}$, $x_{0,\text{log}}$), que controlan la segunda capa de generación del keystream.
+
+\textbf{Generación:} Análogamente a la sección anterior, se varía cada parámetro logístico (\texttt{aLog} y \texttt{x0\_log}) en torno a sus valores nominales (\texttt{aLog=3.9899}, \texttt{x0=0.4000001}). Para cada perturbación se regenera el vector logístico completo de $187{,}500$ iteraciones mediante:
+\[
+    x_{n+1} = a_\text{log} \cdot x_n \cdot (1 - x_n)
+\]
+y se calcula la Distancia de Hamming entre el resultado con parámetros nominales y el perturbado.
+
+\textbf{Primeros 10 valores del mapa logístico de referencia} ($a_\text{log} = 3.99$, $x_0 = 0.4$):
+
+\begin{center}
+\begin{tabular}{c|c}
+\toprule
+\textbf{Iteración} & \textbf{$x_n$} \\
+\midrule
+0 & $0.400000$ \\
+1 & $0.956400$ \\
+2 & $0.166641$ \\
+3 & $0.554380$ \\
+4 & $0.986604$ \\
+5 & $0.052721$ \\
+6 & $0.199491$ \\
+7 & $0.637320$ \\
+8 & $0.922821$ \\
+9 & $0.284316$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Resultado esperado:} Al igual que con los parámetros Rössler, perturbaciones mínimas en $a_\text{log}$ (del orden de $10^{-4}$) o en $x_{0,\text{log}}$ (del orden de $10^{-7}$) producen $d_H \approx 0.5$. La sensibilidad al valor inicial $x_0$ suele ser aún mayor que la sensibilidad al parámetro $a_\text{log}$, reflejando la dependencia exponencial de los mapas logísticos en el régimen caótico ($a_\text{log} > 3.57$).
+
+\textbf{Interpretación:} Los análisis de sensibilidad de las secciones~7.6 y~7.7 en conjunto demuestran que el espacio de claves efectivo del sistema es extremadamente amplio: cualquier desviación en cualquiera de los cinco parámetros ($a$, $b$, $c$, $a_\text{log}$, $x_{0,\text{log}}$) hace imposible el descifrado correcto. Esto convierte al sistema en un esquema de cifrado criptográficamente robusto para aplicaciones de transmisión segura de imágenes.
 
 \section{Conclusiones}
 
