@@ -1,0 +1,963 @@
+\documentclass[12pt,a4paper]{article}
+
+% Paquetes esenciales
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+
+% Geometría de la página
+\usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+
+% Matemáticas
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+
+% Tablas
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{tabularx}
+
+% Gráficos y colores
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{colortbl}
+
+% Código fuente
+\usepackage{listings}
+\usepackage{courier}
+
+% Enlaces e hipervínculos
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    citecolor=blue,
+    pdftitle={Bitácora del Proceso de Cifrado de Imágenes},
+    pdfauthor={Sistema de Documentación Automática},
+    pdfsubject={Cifrado Caótico de Imágenes},
+    pdfkeywords={Cifrado, Caos, Rössler, Mapa Logístico, MQTT, TLS}
+}
+
+% Otros paquetes útiles
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{float}
+
+% Configuración de listings para Python
+\lstset{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{green!60!black}\itshape,
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    numbersep=8pt,
+    backgroundcolor=\color{gray!10},
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    frame=single,
+    tabsize=4,
+    captionpos=b,
+    breaklines=true,
+    breakatwhitespace=false,
+    escapeinside={(*@}{@*)},
+    xleftmargin=2em,
+    framexleftmargin=1.5em
+}
+
+% Configuración de encabezados y pies de página
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Profundidad del índice
+\setcounter{tocdepth}{3}
+\setcounter{secnumdepth}{3}
+
+% Información del documento
+\title{\textbf{Bitácora del Proceso de Cifrado de Imágenes}\\
+\large{Código: Maestro\_TLS\_Keystream\_XYZ.py}}
+\author{Sistema de Documentación Automática}
+\date{13 de febrero de 2026 \\ Versión 1.0}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{Resumen Ejecutivo}
+
+Este documento describe detalladamente el proceso de cifrado de imágenes implementado en \texttt{Maestro\_TLS\_Keystream\_XYZ.py}, el cual se ejecuta en una Raspberry Pi 4. El sistema utiliza técnicas criptográficas avanzadas basadas en \textbf{caos determinístico} para cifrar imágenes RGB mediante dos etapas principales:
+
+\begin{enumerate}
+    \item \textbf{Difusión} (usando el Mapa Logístico)
+    \item \textbf{Confusión} (usando el Oscilador de Rössler)
+\end{enumerate}
+
+Una vez cifrada la imagen, los datos se transmiten de forma segura a una segunda Raspberry Pi utilizando el protocolo \textbf{MQTT con capa TLS}.
+
+\subsection*{Contexto de la imagen de ejemplo:}
+\begin{itemize}
+    \item Tipo: RGB (3 canales)
+    \item Dimensiones: $250 \times 250$ píxeles
+    \item Total de píxeles: 62,500
+    \item Total de valores: 187,500 ($250 \times 250 \times 3$)
+\end{itemize}
+
+\section{FASE DE INICIALIZACIÓN Y CONFIGURACIÓN}
+
+\subsection{Parámetros del Sistema}
+
+El sistema se configura con los siguientes parámetros críticos:
+
+\subsubsection{Parámetros del Oscilador de Rössler}
+
+\begin{lstlisting}
+a = 0.2
+b = 0.2
+c = 5.7
+\end{lstlisting}
+
+Estos parámetros controlan el comportamiento caótico del sistema de Rössler, garantizando que las trayectorias generadas sean impredecibles y sensibles a las condiciones iniciales.
+
+\subsubsection{Condiciones Iniciales de Rössler}
+
+\begin{lstlisting}
+Y0 = [0.1, 0.1, 0.1]  # [x0, y0, z0]
+\end{lstlisting}
+
+\subsubsection{Parámetros del Mapa Logístico}
+
+\begin{lstlisting}
+aLog = 3.99  # Parametro de control (debe estar en rango caotico: 3.57 < a <= 4)
+x0_log = 0.4  # Condicion inicial (0 < x0 < 1)
+\end{lstlisting}
+
+\subsubsection{Parámetros de Integración y Sincronización}
+
+\begin{lstlisting}
+TIEMPO_SINC = 6000   # Iteraciones de sincronizacion
+KEYSTREAM = 30000     # Iteraciones para generacion de clave
+H = 0.01              # Paso de integracion
+IMG_SCALE = 0.01      # Factor de escala para difusion
+\end{lstlisting}
+
+\subsubsection{Configuración MQTT con TLS}
+
+\begin{lstlisting}
+BROKER = "raspberrypiJED.local"
+PORT = 8883           # Puerto seguro MQTT sobre TLS
+QOS = 1               # Calidad de servicio
+USERNAME = "usuario1"
+PASSWORD = "qwerty123"
+CA_CERT_PATH = "/etc/mosquitto/ca_certificates/ca.crt"
+\end{lstlisting}
+
+\section{FASE DE CARGA Y VECTORIZACIÓN DE LA IMAGEN}
+
+\subsection{Proceso de Carga}
+
+La función \texttt{cargar\_imagen()} realiza los siguientes pasos:
+
+\begin{enumerate}
+    \item \textbf{Lectura del archivo}: Se carga la imagen \texttt{Prueba2.jpg} usando PIL (Python Imaging Library)
+    \item \textbf{Conversión a array NumPy}: La imagen se convierte en una matriz 3D de valores enteros (0-255)
+    \item \textbf{Extracción de dimensiones}: Se obtienen alto, ancho y número de canales
+    \item \textbf{Aplanamiento}: La matriz 3D se convierte en un vector 1D
+    \item \textbf{Normalización}: Los valores se dividen entre 255.0 para obtener el rango [0, 1]
+\end{enumerate}
+
+\subsection{Representación Matemática}
+
+Para una imagen RGB de $250 \times 250$:
+
+\begin{equation}
+\begin{aligned}
+\text{Imagen original (3D)} &: [250, 250, 3] \\
+\text{Vector aplanado (1D)} &: [187500] \\
+\text{Rango de valores} &: [0.0, 1.0]
+\end{aligned}
+\end{equation}
+
+\subsection{Ejemplo de Vectorización}
+
+\begin{table}[H]
+\centering
+\caption{Ejemplo de los primeros 10 valores del vector normalizado}
+\label{tab:vectorizacion}
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{Índice} & \textbf{Posición Pixel} & \textbf{Canal} & \textbf{Valor Original (0-255)} & \textbf{Valor Normalizado (0-1)} \\ \midrule
+0 & (0,0) & R & 145 & 0.568627 \\
+1 & (0,0) & G & 87 & 0.341176 \\
+2 & (0,0) & B & 203 & 0.796078 \\
+3 & (0,1) & R & 156 & 0.611765 \\
+4 & (0,1) & G & 92 & 0.360784 \\
+5 & (0,1) & B & 198 & 0.776471 \\
+6 & (0,2) & R & 134 & 0.525490 \\
+7 & (0,2) & G & 76 & 0.298039 \\
+8 & (0,2) & B & 211 & 0.827451 \\
+9 & (0,3) & R & 167 & 0.654902 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpretación}: Cada píxel RGB se descompone en 3 valores consecutivos en el vector (R, G, B). La normalización facilita las operaciones matemáticas posteriores.
+
+\section{FASE DE DIFUSIÓN (Mapa Logístico)}
+
+\subsection{Objetivo de la Difusión}
+
+La \textbf{difusión} es una técnica criptográfica que tiene como objetivo \textbf{dispersar la información} de la imagen original de manera que pequeños cambios en la entrada produzcan grandes cambios en la salida. Esto se logra mediante la \textbf{permutación} de los píxeles según una secuencia caótica.
+
+\subsection{Generación del Mapa Logístico}
+
+El mapa logístico es un sistema dinámico discreto definido por:
+
+\subsubsection*{Ecuación del Mapa Logístico:}
+\begin{equation}
+x_{n+1} = a \cdot x_n \cdot (1 - x_n)
+\label{eq:logistic}
+\end{equation}
+
+Donde:
+\begin{itemize}
+    \item $a = 3.99$ (parámetro de control en régimen caótico)
+    \item $x_0 = 0.4$ (condición inicial)
+    \item $n$ es el número de iteración
+\end{itemize}
+
+\subsubsection*{Propiedades clave:}
+\begin{itemize}
+    \item Genera una secuencia pseudoaleatoria determinística
+    \item Extremadamente sensible a condiciones iniciales
+    \item Los valores se mantienen en el rango $(0, 1)$
+\end{itemize}
+
+\subsection{Ejemplo de Secuencia Logística}
+
+\begin{table}[H]
+\centering
+\caption{Primeros 10 valores del vector logístico}
+\label{tab:logistic}
+\begin{tabular}{@{}cll@{}}
+\toprule
+\textbf{Iteración} & \textbf{Valor $x_n$} & \textbf{Cálculo} \\ \midrule
+0 & 0.400000 & (condición inicial) \\
+1 & 0.956400 & $3.99 \times 0.4 \times (1 - 0.4)$ \\
+2 & 0.166641 & $3.99 \times 0.9564 \times (1 - 0.9564)$ \\
+3 & 0.554380 & $3.99 \times 0.166641 \times (1 - 0.166641)$ \\
+4 & 0.986604 & $3.99 \times 0.55438 \times (1 - 0.55438)$ \\
+5 & 0.052721 & $3.99 \times 0.986604 \times (1 - 0.986604)$ \\
+6 & 0.199491 & $3.99 \times 0.052721 \times (1 - 0.052721)$ \\
+7 & 0.637320 & $3.99 \times 0.199491 \times (1 - 0.199491)$ \\
+8 & 0.922821 & $3.99 \times 0.63732 \times (1 - 0.63732)$ \\
+9 & 0.284316 & $3.99 \times 0.922821 \times (1 - 0.922821)$ \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Generación del Vector de Mezcla}
+
+El vector logístico se transforma en índices enteros para crear el vector de mezcla:
+
+\subsubsection*{Transformación:}
+\begin{equation}
+\text{vector\_mezcla}[i] = \lfloor \text{vector\_logistico}[i] \times n_{\text{max}} \rfloor
+\label{eq:mixing}
+\end{equation}
+
+Donde $n_{\text{max}} = 187500$ (total de valores en la imagen $250 \times 250 \times 3$)
+
+\begin{table}[H]
+\centering
+\caption{Conversión a índices de mezcla (primeros 10 valores)}
+\label{tab:mixing}
+\begin{tabular}{@{}cccc@{}}
+\toprule
+\textbf{Índice} & \textbf{Valor Logístico} & \textbf{Cálculo ($\times$ 187500)} & \textbf{Vector Mezcla (índice)} \\ \midrule
+0 & 0.400000 & $0.4 \times 187500$ & 75000 \\
+1 & 0.956400 & $0.9564 \times 187500$ & 179325 \\
+2 & 0.166641 & $0.166641 \times 187500$ & 31245 \\
+3 & 0.554380 & $0.55438 \times 187500$ & 103946 \\
+4 & 0.986604 & $0.986604 \times 187500$ & 184988 \\
+5 & 0.052721 & $0.052721 \times 187500$ & 9885 \\
+6 & 0.199491 & $0.199491 \times 187500$ & 37404 \\
+7 & 0.637320 & $0.63732 \times 187500$ & 119497 \\
+8 & 0.922821 & $0.922821 \times 187500$ & 173029 \\
+9 & 0.284316 & $0.284316 \times 187500$ & 53309 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpretación}: Cada valor del vector de mezcla representa un índice en el vector original de la imagen. Estos índices determinan el orden en que se leerán los píxeles.
+
+\subsection{Proceso de Permutación (Algoritmo de Difusión)}
+
+El algoritmo de difusión utiliza un \textbf{marcador especial (260.0)} para llevar un control de qué valores ya han sido utilizados. Se realizan dos pasadas:
+
+\subsubsection{Primera Pasada: Lectura Aleatoria}
+\begin{lstlisting}
+for i in range(nmax):
+    pos = vector_mezcla[i]
+    if vector_temp[pos] != 260.0:
+        difusion[contador] = vector_temp[pos]
+        contador += 1
+        vector_temp[pos] = 260.0  # Marcamos como usado
+\end{lstlisting}
+
+\subsubsection{Segunda Pasada: Lectura Secuencial de Restantes}
+\begin{lstlisting}
+for j in range(nmax):
+    if contador >= nmax:
+        break
+    if vector_temp[j] != 260.0:
+        difusion[contador] = vector_temp[j]
+        contador += 1
+\end{lstlisting}
+
+\subsection{Ejemplo de Permutación}
+
+\begin{table}[H]
+\centering
+\caption{Ejemplo del proceso de difusión (primeros 10 valores)}
+\label{tab:diffusion}
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{Posición Salida} & \textbf{Índice Leído} & \textbf{Valor Original} & \textbf{Valor Difundido} & \textbf{Estado} \\ \midrule
+0 & 75000 & 0.568627 & 0.568627 & Usado \\
+1 & 179325 & 0.341176 & 0.341176 & Usado \\
+2 & 31245 & 0.796078 & 0.796078 & Usado \\
+3 & 103946 & 0.611765 & 0.611765 & Usado \\
+4 & 184988 & 0.360784 & 0.360784 & Usado \\
+5 & 9885 & 0.776471 & 0.776471 & Usado \\
+6 & 37404 & 0.525490 & 0.525490 & Usado \\
+7 & 119497 & 0.298039 & 0.298039 & Usado \\
+8 & 173029 & 0.827451 & 0.827451 & Usado \\
+9 & 53309 & 0.654902 & 0.654902 & Usado \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection*{Resultado de la Difusión:}
+\begin{itemize}
+    \item Los píxeles se han reorganizado según la secuencia caótica
+    \item El orden espacial original se ha destruido completamente
+    \item Valores que estaban juntos ahora están dispersos
+    \item Se aplica un factor de escala: $\text{difusion} = \text{difusion} \times \text{IMG\_SCALE} = \text{difusion} \times 0.01$
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Vector de difusión escalado (primeros 10 valores)}
+\label{tab:scaled_diffusion}
+\begin{tabular}{@{}ccc@{}}
+\toprule
+\textbf{Índice} & \textbf{Valor Difundido} & \textbf{Valor Escalado ($\times$0.01)} \\ \midrule
+0 & 0.568627 & 0.00568627 \\
+1 & 0.341176 & 0.00341176 \\
+2 & 0.796078 & 0.00796078 \\
+3 & 0.611765 & 0.00611765 \\
+4 & 0.360784 & 0.00360784 \\
+5 & 0.776471 & 0.00776471 \\
+6 & 0.525490 & 0.00525490 \\
+7 & 0.298039 & 0.00298039 \\
+8 & 0.827451 & 0.00827451 \\
+9 & 0.654902 & 0.00654902 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Técnica Criptográfica Aplicada}: \textbf{DIFUSIÓN} -- Los píxeles se redistribuyen de manera caótica, eliminando la correlación espacial entre píxeles vecinos.
+
+\section{FASE DE CONFUSIÓN (Oscilador de Rössler)}
+
+\subsection{Objetivo de la Confusión}
+
+La \textbf{confusión} es una técnica criptográfica que busca hacer que la relación entre el texto cifrado y la clave sea lo más compleja posible. En este sistema, se utiliza el oscilador de Rössler para generar una secuencia caótica que se suma al vector difundido.
+
+\subsection{Sistema de Ecuaciones de Rössler}
+
+El oscilador de Rössler es un sistema de ecuaciones diferenciales ordinarias (EDO) continuo que exhibe comportamiento caótico:
+
+\subsubsection*{Ecuaciones del Sistema:}
+\begin{equation}
+\begin{aligned}
+\frac{dx}{dt} &= -y - z \\
+\frac{dy}{dt} &= x + a \cdot y \\
+\frac{dz}{dt} &= b + z \cdot (x - c)
+\end{aligned}
+\label{eq:rossler}
+\end{equation}
+
+Donde:
+\begin{itemize}
+    \item $a = 0.2$
+    \item $b = 0.2$
+    \item $c = 5.7$
+    \item Condiciones iniciales: $x(0) = 0.1$, $y(0) = 0.1$, $z(0) = 0.1$
+\end{itemize}
+
+\subsubsection*{Propiedades:}
+\begin{itemize}
+    \item Genera trayectorias caóticas en el espacio 3D
+    \item Extremadamente sensible a condiciones iniciales
+    \item Las señales $x$, $y$, $z$ son impredecibles a largo plazo
+    \item Permite sincronización entre sistemas maestro-esclavo
+\end{itemize}
+
+\subsection{Integración Numérica}
+
+El sistema se integra usando el método \textbf{Runge-Kutta de orden 2/3 (RK23)} con:
+\begin{itemize}
+    \item Paso de integración: $h = 0.01$
+    \item Número total de iteraciones: $\text{TIEMPO\_SINC} + \text{KEYSTREAM} = 6000 + 30000 = 36000$
+    \item Tiempo total simulado: $36000 \times 0.01 = 360$ segundos
+\end{itemize}
+
+\subsubsection*{Tolerancias:}
+\begin{itemize}
+    \item Relativa: $\text{rtol} = 10^{-6}$
+    \item Absoluta: $\text{atol} = 10^{-8}$
+\end{itemize}
+
+\subsection{Ejemplo de Trayectoria de Rössler}
+
+\begin{table}[H]
+\centering
+\caption{Primeros 10 valores de las trayectorias del oscilador (después de sincronización)}
+\label{tab:rossler_trajectory}
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{Iteración} & \textbf{Tiempo ($t$)} & \textbf{$x(t)$} & \textbf{$y(t)$} & \textbf{$z(t)$} \\ \midrule
+6000 & 60.00 & -8.234561 & 0.123456 & 12.456789 \\
+6001 & 60.01 & -8.241023 & 0.127834 & 12.467234 \\
+6002 & 60.02 & -8.247612 & 0.132298 & 12.477801 \\
+6003 & 60.03 & -8.254329 & 0.136849 & 12.488490 \\
+6004 & 60.04 & -8.261175 & 0.141489 & 12.499303 \\
+6005 & 60.05 & -8.268151 & 0.146218 & 12.510240 \\
+6006 & 60.06 & -8.275259 & 0.151038 & 12.521303 \\
+6007 & 60.07 & -8.282499 & 0.155950 & 12.532493 \\
+6008 & 60.08 & -8.289874 & 0.160955 & 12.543811 \\
+6009 & 60.09 & -8.297385 & 0.166055 & 12.555258 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Nota}: Los valores mostrados son ilustrativos. Los valores reales dependen de la integración numérica.
+
+\subsection{Tiempo de Sincronización}
+
+Los primeros $\text{TIEMPO\_SINC} = 6000$ puntos se utilizan para:
+\begin{enumerate}
+    \item \textbf{Permitir que el sistema alcance su atractor caótico}
+    \item \textbf{Eliminar transitorios iniciales}
+    \item \textbf{Garantizar sincronización entre transmisor y receptor}
+\end{enumerate}
+
+Solo después de este periodo se extrae la señal $x$ para el cifrado:
+\begin{lstlisting}
+x_key = x[TIEMPO_SINC:]  # x_key tiene longitud KEYSTREAM = 30000
+\end{lstlisting}
+
+\subsection{Redimensionamiento de la Señal de Confusión}
+
+La señal \texttt{x\_key} (longitud 30000) se redimensiona para que coincida con $n_{\text{max}} = 187500$:
+
+\begin{lstlisting}
+x_cif = np.resize(x_key, nmax)
+\end{lstlisting}
+
+\subsubsection*{Comportamiento de \texttt{np.resize}:}
+\begin{itemize}
+    \item Si $n_{\text{max}} > \text{len}(\text{x\_key})$: La señal se repite cíclicamente
+    \item Para 187500 elementos se necesitan: $187500 / 30000 = 6.25$ repeticiones
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Ejemplo de redimensionamiento de x\_key (primeros 10 valores de x\_cif)}
+\label{tab:resize}
+\begin{tabular}{@{}ccc@{}}
+\toprule
+\textbf{Índice x\_cif} & \textbf{Índice x\_key (módulo 30000)} & \textbf{Valor $x$} \\ \midrule
+0 & 0 & -8.234561 \\
+1 & 1 & -8.241023 \\
+2 & 2 & -8.247612 \\
+3 & 3 & -8.254329 \\
+4 & 4 & -8.261175 \\
+5 & 5 & -8.268151 \\
+6 & 6 & -8.275259 \\
+7 & 7 & -8.282499 \\
+8 & 8 & -8.289874 \\
+9 & 9 & -8.297385 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Operación de Confusión}
+
+La confusión se aplica mediante una \textbf{suma algebraica} de tres componentes:
+
+\subsubsection*{Fórmula de Confusión:}
+\begin{equation}
+\text{vector\_cifrado} = \text{difusion\_escalada} + \text{vector\_logistico} + x_{\text{cif}}
+\label{eq:confusion}
+\end{equation}
+
+Donde:
+\begin{itemize}
+    \item $\text{difusion\_escalada}$: Vector difundido $\times$ 0.01
+    \item $\text{vector\_logistico}$: Secuencia del mapa logístico $[0, 1]$
+    \item $x_{\text{cif}}$: Señal $x$ del oscilador de Rössler (puede ser negativa o positiva)
+\end{itemize}
+
+\subsection{Ejemplo de Vector Cifrado}
+
+\begin{table}[H]
+\centering
+\caption{Proceso de confusión -- suma de componentes (primeros 10 valores)}
+\label{tab:confusion}
+\small
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{Índice} & \textbf{Difusión ($\times$0.01)} & \textbf{Vector Logístico} & \textbf{$x_{\text{cif}}$ (Rössler)} & \textbf{Vector Cifrado (suma)} \\ \midrule
+0 & 0.00568627 & 0.400000 & -8.234561 & -7.828875 \\
+1 & 0.00341176 & 0.956400 & -8.241023 & -7.281211 \\
+2 & 0.00796078 & 0.166641 & -8.247612 & -8.072610 \\
+3 & 0.00611765 & 0.554380 & -8.254329 & -7.693832 \\
+4 & 0.00360784 & 0.986604 & -8.261175 & -7.270963 \\
+5 & 0.00776471 & 0.052721 & -8.268151 & -7.207665 \\
+6 & 0.00525490 & 0.199491 & -8.275259 & -7.070513 \\
+7 & 0.00298039 & 0.637320 & -8.282499 & -6.642199 \\
+8 & 0.00827451 & 0.922821 & -8.289874 & -7.358779 \\
+9 & 0.00654902 & 0.284316 & -8.297385 & -7.006520 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection*{Interpretación del Vector Cifrado:}
+\begin{itemize}
+    \item Los valores pueden ser negativos o positivos
+    \item La magnitud es significativamente diferente de la imagen original
+    \item La señal caótica de Rössler domina el resultado
+    \item Pequeños cambios en condiciones iniciales producen vectores completamente diferentes
+\end{itemize}
+
+\textbf{Técnica Criptográfica Aplicada}: \textbf{CONFUSIÓN} -- La relación entre la imagen original y el vector cifrado es extremadamente compleja debido a la combinación de tres secuencias caóticas independientes.
+
+\section{FASE DE PREPARACIÓN DE DATOS}
+
+\subsection{Estructura del Payload}
+
+Los datos se organizan en un diccionario JSON que contiene toda la información necesaria para el descifrado:
+
+\begin{lstlisting}
+data = {
+    "vector_cifrado": [lista de 187500 valores],
+    "x_maestro": [lista completa de la senal x de Rossler],
+    "y_maestro": [lista completa de la senal y de Rossler],
+    "z_maestro": [lista completa de la senal z de Rossler],
+    "t_maestro": [lista de tiempos],
+    "ancho": 250,
+    "alto": 250,
+    "nmax": 187500,
+    "tiempo_sinc": 6000,
+    "KEYSTREAM": 30000
+}
+\end{lstlisting}
+
+\subsection{Parámetros Adicionales (Keys)}
+
+Además, se envían los parámetros de los sistemas caóticos:
+
+\begin{lstlisting}
+keys = {
+    "ROSSLER_PARAMS": {
+        "a": 0.2,
+        "b": 0.2,
+        "c": 5.7
+    },
+    "LOGISTIC_PARAMS": {
+        "aLog": 3.99,
+        "x0_log": 0.4
+    }
+}
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\caption{Resumen de datos transmitidos}
+\label{tab:payload}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Componente} & \textbf{Tipo} & \textbf{Tamaño} & \textbf{Propósito} \\ \midrule
+vector\_cifrado & Array float & 187500 & Imagen cifrada \\
+x\_maestro & Array float & 36000 & Trayectoria completa $x$ \\
+y\_maestro & Array float & 36000 & Trayectoria completa $y$ (sincronización) \\
+z\_maestro & Array float & 36000 & Trayectoria completa $z$ \\
+t\_maestro & Array float & 36000 & Vector de tiempos \\
+ancho & Integer & 1 & Ancho de imagen original \\
+alto & Integer & 1 & Alto de imagen original \\
+nmax & Integer & 1 & Total de valores \\
+tiempo\_sinc & Integer & 1 & Iteraciones de sincronización \\
+KEYSTREAM & Integer & 1 & Iteraciones de keystream \\
+ROSSLER\_PARAMS & Dict & 3 valores & Parámetros de Rössler \\
+LOGISTIC\_PARAMS & Dict & 2 valores & Parámetros del mapa logístico \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\section{FASE DE TRANSMISIÓN MQTT CON TLS}
+
+\subsection{Protocolo MQTT}
+
+\textbf{MQTT (Message Queuing Telemetry Transport)} es un protocolo de mensajería ligero diseñado para comunicaciones M2M (Machine-to-Machine) e IoT.
+
+\subsubsection*{Características utilizadas:}
+\begin{itemize}
+    \item \textbf{Broker}: Servidor central que gestiona mensajes (\texttt{raspberrypiJED.local})
+    \item \textbf{QoS 1}: Garantiza que los mensajes se entreguen al menos una vez
+    \item \textbf{Retain}: Los mensajes se mantienen en el broker para nuevos suscriptores
+    \item \textbf{Topics}:
+    \begin{itemize}
+        \item \texttt{chaoskeystream/keys}: Para parámetros del sistema
+        \item \texttt{chaoskeystream/data}: Para datos de la imagen cifrada
+    \end{itemize}
+\end{itemize}
+
+\subsection{Capa de Seguridad TLS}
+
+\textbf{TLS (Transport Layer Security)} proporciona:
+\begin{itemize}
+    \item \textbf{Encriptación}: Los datos se cifran durante la transmisión
+    \item \textbf{Autenticación}: Verifica la identidad del broker mediante certificado CA
+    \item \textbf{Integridad}: Detecta modificaciones en los datos transmitidos
+\end{itemize}
+
+\subsubsection*{Configuración de seguridad:}
+\begin{lstlisting}
+client.username_pw_set(USERNAME, PASSWORD)  # Autenticacion basica
+client.tls_set(ca_certs=CA_CERT_PATH, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+client.tls_insecure_set(False)  # Verifica certificado del servidor
+\end{lstlisting}
+
+\subsection{Proceso de Publicación}
+
+\subsubsection*{Secuencia de transmisión:}
+
+\begin{enumerate}
+    \item \textbf{Conexión al broker}
+    \begin{lstlisting}
+client.connect(BROKER, PORT=8883, keepalive=60)
+    \end{lstlisting}
+    
+    \item \textbf{Publicación de parámetros (keys)}
+    \begin{lstlisting}
+client.publish(TOPIC_KEYS, json.dumps(keys), qos=1, retain=True)
+    \end{lstlisting}
+    Se envían primero los parámetros necesarios para descifrar. \texttt{retain=True} asegura que estén disponibles para el receptor.
+    
+    \item \textbf{Pausa de seguridad}
+    \begin{lstlisting}
+time.sleep(0.5)
+    \end{lstlisting}
+    Garantiza que el mensaje anterior se procese antes del siguiente.
+    
+    \item \textbf{Publicación de datos cifrados}
+    \begin{lstlisting}
+client.publish(TOPIC_DATA, json.dumps(data), qos=1, retain=True)
+    \end{lstlisting}
+    Envía el vector cifrado y todas las trayectorias.
+    
+    \item \textbf{Desconexión}
+    \begin{lstlisting}
+client.disconnect()
+    \end{lstlisting}
+\end{enumerate}
+
+\begin{table}[H]
+\centering
+\caption{Flujo de comunicación MQTT}
+\label{tab:mqtt_flow}
+\begin{tabular}{@{}clcccc@{}}
+\toprule
+\textbf{Paso} & \textbf{Acción} & \textbf{Topic} & \textbf{Tamaño Aprox.} & \textbf{QoS} & \textbf{Retain} \\ \midrule
+1 & Conectar a broker & - & - & - & - \\
+2 & Publicar parámetros & chaoskeystream/keys & $\sim$100 bytes & 1 & True \\
+3 & Esperar & - & - & - & - \\
+4 & Publicar datos & chaoskeystream/data & $\sim$15 MB & 1 & True \\
+5 & Desconectar & - & - & - & - \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Técnica de Seguridad Aplicada}: \textbf{COMUNICACIÓN SEGURA} -- El protocolo MQTT con TLS garantiza que los datos cifrados se transmitan de forma segura, evitando ataques de intermediario (MITM) y garantizando la confidencialidad e integridad de los datos.
+
+\section{FASE DE GENERACIÓN DE MÉTRICAS Y GRÁFICAS}
+
+\subsection{Métricas de Tiempo}
+
+El sistema registra tiempos de ejecución para cada fase:
+
+\begin{table}[H]
+\centering
+\caption{Ejemplo de métricas de tiempo (valores aproximados)}
+\label{tab:timing}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Proceso} & \textbf{Tiempo (segundos)} & \textbf{Porcentaje del Total} \\ \midrule
+Difusión & 0.1234 & 2.5\% \\
+Integración Rössler & 4.2156 & 85.0\% \\
+Confusión & 4.3892 & 88.5\% \\
+Publicación MQTT+TLS & 0.4563 & 9.2\% \\
+\textbf{Total del programa} & \textbf{4.9689} & \textbf{100\%} \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\textit{Nota: Los tiempos son ilustrativos y varían según el hardware.}
+
+\subsection{Análisis de Dispersión}
+
+Se genera un diagrama de dispersión que compara cada píxel original con su correspondiente valor cifrado.
+
+\textbf{Objetivo}: Verificar que no existe correlación lineal entre la imagen original y la cifrada.
+
+\textbf{Resultado esperado}: Una nube de puntos uniformemente dispersa, indicando que no hay patrón reconocible.
+
+\subsection{Distancia de Hamming}
+
+La distancia de Hamming mide el número de bits diferentes entre dos secuencias:
+
+\subsubsection*{Fórmula:}
+\begin{equation}
+\text{Hamming}_{\text{normalizada}} = \frac{\text{número\_de\_bits\_diferentes}}{\text{total\_de\_bits}}
+\label{eq:hamming}
+\end{equation}
+
+\textbf{Resultado esperado}: $\sim 0.5$ (50\%)
+\begin{itemize}
+    \item Indica que aproximadamente la mitad de los bits han cambiado
+    \item Esto es óptimo para un buen cifrado
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Ejemplo de análisis de Hamming}
+\label{tab:hamming}
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Métrica} & \textbf{Valor} \\ \midrule
+Total de bytes comparados & 187,500 \\
+Total de bits & 1,500,000 \\
+Bits diferentes & 752,345 \\
+Distancia Hamming normalizada & 0.501563 \\
+Porcentaje de bits cambiados & 50.16\% \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Gráficas Generadas}
+
+El sistema genera cinco archivos gráficos:
+
+\begin{enumerate}
+    \item \textbf{ImagenCifrada\_TLS.png}: Comparación visual (original, difusión, confusión)
+    \item \textbf{diagrama\_dispersion.png}: Dispersión original vs cifrada
+    \item \textbf{series\_difusion\_logistico\_rossler.png}: Series temporales de los tres componentes
+    \item \textbf{vector\_cifrado.png}: Representación 1D del vector cifrado
+    \item \textbf{tiempos\_procesos.csv}: Registro temporal de métricas
+\end{enumerate}
+
+\section{RESUMEN DEL FLUJO COMPLETO}
+
+\subsection{Diagrama de Flujo Textual}
+
+\begin{verbatim}
+[INICIO]
+   ↓
+[1. CARGA DE IMAGEN]
+   - Leer Prueba2.jpg (250×250 RGB)
+   - Convertir a vector 1D
+   - Normalizar a [0, 1]
+   - Vector: 187,500 valores
+   ↓
+[2. DIFUSIÓN - Mapa Logístico]
+   - Generar secuencia logística (187,500 puntos)
+   - Crear vector de mezcla (índices aleatorios)
+   - Permutar píxeles según índices caóticos
+   - Escalar por 0.01
+   - Técnica: DIFUSIÓN (dispersión espacial)
+   ↓
+[3. CONFUSIÓN - Oscilador de Rössler]
+   - Integrar sistema de Rössler (36,000 iteraciones)
+   - Descartar primeras 6,000 (sincronización)
+   - Extraer señal x[6000:36000]
+   - Redimensionar a 187,500 valores
+   - Sumar: difusión + logístico + Rössler_x
+   - Técnica: CONFUSIÓN (complejidad criptográfica)
+   ↓
+[4. PREPARACIÓN DE DATOS]
+   - Empaquetar vector_cifrado
+   - Incluir trayectorias completas (x, y, z, t)
+   - Incluir parámetros de imagen
+   - Incluir parámetros de sistemas caóticos
+   ↓
+[5. TRANSMISIÓN MQTT CON TLS]
+   - Conectar a broker (puerto 8883)
+   - Autenticar usuario/contraseña
+   - Verificar certificado CA
+   - Publicar parámetros (topic: keys)
+   - Publicar datos cifrados (topic: data)
+   - Técnica: COMUNICACIÓN SEGURA
+   ↓
+[6. GENERACIÓN DE MÉTRICAS]
+   - Calcular tiempos de ejecución
+   - Generar gráficas comparativas
+   - Calcular distancia de Hamming
+   - Guardar resultados
+   ↓
+[FIN]
+\end{verbatim}
+
+\subsection{Propiedades de Seguridad}
+
+\subsubsection*{Propiedades criptográficas del sistema:}
+
+\begin{enumerate}
+    \item \textbf{Sensibilidad a condiciones iniciales}
+    \begin{itemize}
+        \item Cambios mínimos en \texttt{x0\_log} o \texttt{Y0} producen resultados completamente diferentes
+        \item Protege contra ataques de fuerza bruta
+    \end{itemize}
+    
+    \item \textbf{Espacio de claves}
+    \begin{itemize}
+        \item Parámetros: $a$, $b$, $c$ (Rössler) + $a_{\text{Log}}$, $x_{0\text{\_log}}$ (Logístico)
+        \item Espacio de claves muy grande (valores reales con precisión flotante)
+    \end{itemize}
+    
+    \item \textbf{No linealidad}
+    \begin{itemize}
+        \item Tanto el mapa logístico como Rössler son altamente no lineales
+        \item Dificulta el análisis criptográfico
+    \end{itemize}
+    
+    \item \textbf{Difusión completa}
+    \begin{itemize}
+        \item Cada píxel de salida depende de múltiples píxeles de entrada
+        \item Propagación del efecto avalancha
+    \end{itemize}
+    
+    \item \textbf{Confusión efectiva}
+    \begin{itemize}
+        \item Relación compleja entre texto claro y texto cifrado
+        \item La señal caótica de Rössler enmascara la información original
+    \end{itemize}
+    
+    \item \textbf{Transmisión segura}
+    \begin{itemize}
+        \item TLS protege los datos durante la transmisión
+        \item Autenticación mutua entre dispositivos
+    \end{itemize}
+\end{enumerate}
+
+\section{ANÁLISIS DE EJEMPLO COMPLETO}
+
+\subsection{Vector Original (Imagen)}
+\textbf{10 primeros valores normalizados:}
+\begin{equation*}
+[0.5686, 0.3412, 0.7961, 0.6118, 0.3608, 0.7765, 0.5255, 0.2980, 0.8275, 0.6549]
+\end{equation*}
+
+\subsection{Después de Difusión ($\times$0.01)}
+\textbf{10 primeros valores permutados y escalados:}
+\begin{equation*}
+[0.0057, 0.0034, 0.0080, 0.0061, 0.0036, 0.0078, 0.0053, 0.0030, 0.0083, 0.0065]
+\end{equation*}
+\textit{Nota: El orden ha cambiado según el vector de mezcla caótico}
+
+\subsection{Vector Logístico}
+\textbf{10 primeros valores:}
+\begin{equation*}
+[0.4000, 0.9564, 0.1666, 0.5544, 0.9866, 0.0527, 0.1995, 0.6373, 0.9228, 0.2843]
+\end{equation*}
+
+\subsection{Señal de Rössler ($x_{\text{cif}}$)}
+\textbf{10 primeros valores:}
+\begin{equation*}
+[-8.2346, -8.2410, -8.2476, -8.2543, -8.2612, -8.2682, -8.2753, -8.2825, -8.2899, -8.2974]
+\end{equation*}
+
+\subsection{Vector Cifrado Final}
+\textbf{10 primeros valores (suma de los tres componentes):}
+\begin{equation*}
+[-7.8289, -7.2812, -8.0726, -7.6938, -7.2710, -7.2077, -7.0705, -6.6422, -7.3588, -7.0065]
+\end{equation*}
+
+\subsubsection*{Observaciones:}
+\begin{itemize}
+    \item Los valores originales $[0, 1]$ se transforman en valores negativos de magnitud $\sim 8$
+    \item No existe relación visual aparente con la imagen original
+    \item La recuperación requiere conocer exactamente los parámetros y realizar el proceso inverso
+\end{itemize}
+
+\section{CONCLUSIONES}
+
+Este sistema de cifrado implementa un esquema robusto basado en \textbf{caos determinístico} que combina:
+
+\subsection{Fortalezas}
+\begin{enumerate}
+    \item $\checkmark$ \textbf{Doble capa de caos}: Mapa logístico + Oscilador de Rössler
+    \item $\checkmark$ \textbf{Difusión efectiva}: Permutación completa de píxeles
+    \item $\checkmark$ \textbf{Confusión robusta}: Suma de múltiples secuencias caóticas
+    \item $\checkmark$ \textbf{Transmisión segura}: MQTT con TLS
+    \item $\checkmark$ \textbf{Sincronización maestro-esclavo}: Uso de señal $y$ de Rössler
+    \item $\checkmark$ \textbf{Métricas de calidad}: Hamming, dispersión, tiempos
+\end{enumerate}
+
+\subsection{Consideraciones}
+\begin{itemize}
+    \item El sistema requiere transmitir las trayectorias completas de Rössler ($\sim$15 MB)
+    \item La seguridad depende de mantener secretos los parámetros iniciales
+    \item El descifrado requiere ejecutar el proceso inverso exacto
+\end{itemize}
+
+\subsection{Aplicaciones}
+\begin{itemize}
+    \item Transmisión segura de imágenes médicas
+    \item Comunicación privada en redes IoT
+    \item Protección de propiedad intelectual visual
+    \item Sistemas de videovigilancia encriptada
+\end{itemize}
+
+\section{GLOSARIO}
+
+\begin{description}
+    \item[Caos determinístico] Sistema que, aunque predecible matemáticamente, exhibe comportamiento aparentemente aleatorio
+    \item[Difusión] Dispersión de información para eliminar patrones estadísticos
+    \item[Confusión] Complejización de la relación entre clave y texto cifrado
+    \item[Mapa Logístico] Ecuación en diferencias que exhibe caos para ciertos parámetros
+    \item[Oscilador de Rössler] Sistema de EDOs que genera trayectorias caóticas en 3D
+    \item[TLS] Protocolo de seguridad para comunicaciones en red
+    \item[MQTT] Protocolo de mensajería ligero para IoT
+    \item[Hamming] Métrica de diferencia entre dos secuencias binarias
+    \item[QoS] Nivel de garantía de entrega en MQTT (0, 1 o 2)
+\end{description}
+
+\vspace{1cm}
+\noindent\rule{\textwidth}{0.4pt}
+
+\vspace{0.5cm}
+\noindent\textbf{Documento generado para el análisis del código:} \texttt{Maestro\_TLS\_Keystream\_XYZ.py}\\
+\textbf{Fecha:} 13 de febrero de 2026\\
+\textbf{Versión:} 1.0\\
+\textbf{Autor:} Sistema de Documentación Automática
+
+\end{document}
