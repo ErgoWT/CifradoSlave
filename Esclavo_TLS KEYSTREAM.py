@@ -459,8 +459,7 @@ def distancia_hamming(imagen_original, imagen_descifrada):
 
 def experimento_hamming_vs_a(
     ROSSLER_PARAMS,
-    LOGISTIC_PARAMS,
-    y_sinc,
+    y_maestro,
     times,
     time_sinc,
     nmax,
@@ -471,47 +470,59 @@ def experimento_hamming_vs_a(
     vector_logistico
 ):
     img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
-    valores_a = np.arange(0.0, 1.0 + 1e-6, 0.02)
+
+    a_original_mqtt = float(ROSSLER_PARAMS['a'])
+    valores_a_nominales = [i / 50 for i in range(1, 51)]  # 0.02, 0.04, ..., 1.00
     resultados = []
-    
+
     print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'a' de Rössler...")
-    
-    for a_val in valores_a:
-        print(f"[HAMMING] Evaluando a = {a_val:.2f}...")
+    print(f"[HAMMING] Valor original de 'a' recibido por MQTT: {a_original_mqtt:.15f}")
+
+    for a_nominal in valores_a_nominales:
         params_test = dict(ROSSLER_PARAMS)
-        params_test['a'] = float(a_val)
-        # Se añade la siguiente instruccion para asegurar utilizar el valor real de rosslerparams
-        # cuando valores_a contenga 0.2 (valor original)
-        if abs(a_val - ROSSLER_PARAMS['a']) < 1e-8:
-            params_test['a'] = ROSSLER_PARAMS['a']
-            
-        
-        # Sincronizar con el nuevo a
-        _, _, y_slave, t_slave, x_sinc = sincronizacion(
-            y_sinc, times, params_test, time_sinc, keystream, nmax
+
+        if np.isclose(a_nominal, a_original_mqtt, rtol=0.0, atol=1e-12):
+            a_utilizado = a_original_mqtt
+            print(
+                f"[HAMMING] Evaluando a = {a_nominal:.2f} "
+                f"(usando valor exacto recibido por MQTT: {a_utilizado:.15f})..."
+            )
+        else:
+            a_utilizado = float(a_nominal)
+            print(f"[HAMMING] Evaluando a = {a_utilizado:.2f}...")
+
+        params_test['a'] = a_utilizado
+
+        # Sincronizar con el nuevo valor de 'a'
+        _, _, _, _, x_sinc_barrido = sincronizacion(
+            y_maestro, times, params_test, time_sinc, keystream, nmax
         )
-        # Descifrar
-        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc)
+
+        # Descifrar siguiendo exactamente el mismo flujo del main()
+        difusion_x = revertir_confusion(vector_cifrado, vector_logistico, x_sinc_barrido)
+        difusion = difusion_x * IMG_SCALE
         imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
 
-        # Calcular la distancia hamming
+        # Calcular la distancia de Hamming
         hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
         resultados.append({
-            "a": a_val,
+            "a_barrido": round(a_nominal, 2),
+            "a_utilizado": a_utilizado,
+            "a_es_original_mqtt": int(np.isclose(a_utilizado, a_original_mqtt, rtol=0.0, atol=1e-15)),
             "hamming_abs": hamming_abs,
             "hamming_norm": hamming_norm
         })
-        
+
         df_resultados = pd.DataFrame(resultados)
         df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_A, index=False)
         print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_A}")
 
         plt.figure(figsize=(10, 6))
-        plt.plot(df_resultados['a'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
-        plt.xlabel("a")
-        plt.ylabel("Distancia de Hamming")
-        plt.title("Distancia de hamming imagen original vs descifrada")
-        plt.grid(True, alpha = 0.3)
+        plt.plot(df_resultados['a_barrido'], df_resultados['hamming_abs'], marker='o', linewidth=0.8)
+        plt.xlabel("Parámetro a")
+        plt.ylabel("Distancia de Hamming absoluta")
+        plt.title("Distancia de Hamming vs parámetro a de Rössler")
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(RUTA_DISTANCIA_HAMMING_A, dpi=300)
         plt.close()
@@ -519,8 +530,7 @@ def experimento_hamming_vs_a(
 
 def experimento_hamming_vs_b(
     ROSSLER_PARAMS,
-    LOGISTIC_PARAMS,
-    y_sinc,
+    y_maestro,
     times,
     time_sinc,
     nmax,
@@ -531,42 +541,59 @@ def experimento_hamming_vs_b(
     vector_logistico
 ):
     img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
-    valores_b = np.arange(0.0, 1.0 + 1e-6, 0.02)
+
+    b_original_mqtt = float(ROSSLER_PARAMS['b'])
+    valores_b_nominales = [i / 50 for i in range(1, 51)]  # 0.02, 0.04, ..., 1.00
     resultados = []
-    
+
     print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'b' de Rössler...")
-    
-    for b_val in valores_b:
-        print(f"[HAMMING] Evaluando b = {b_val:.2f}...")
+    print(f"[HAMMING] Valor original de 'b' recibido por MQTT: {b_original_mqtt:.15f}")
+
+    for b_nominal in valores_b_nominales:
         params_test = dict(ROSSLER_PARAMS)
-        params_test['b'] = float(b_val)
-        
-        # Sincronizar con el nuevo b
-        _, _, y_slave, t_slave, x_sinc = sincronizacion(
-            y_sinc, times, params_test, time_sinc, keystream, nmax
+
+        if np.isclose(b_nominal, b_original_mqtt, rtol=0.0, atol=1e-12):
+            b_utilizado = b_original_mqtt
+            print(
+                f"[HAMMING] Evaluando b = {b_nominal:.2f} "
+                f"(usando valor exacto recibido por MQTT: {b_utilizado:.15f})..."
+            )
+        else:
+            b_utilizado = float(b_nominal)
+            print(f"[HAMMING] Evaluando b = {b_utilizado:.2f}...")
+
+        params_test['b'] = b_utilizado
+
+        # Sincronizar con el nuevo valor de 'b'
+        _, _, _, _, x_sinc_barrido = sincronizacion(
+            y_maestro, times, params_test, time_sinc, keystream, nmax
         )
-        # Descifrar
-        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+
+        # Descifrar siguiendo exactamente el mismo flujo del main()
+        difusion_x = revertir_confusion(vector_cifrado, vector_logistico, x_sinc_barrido)
+        difusion = difusion_x * IMG_SCALE
         imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
 
-        # Calcular la distancia hamming
+        # Calcular la distancia de Hamming
         hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
         resultados.append({
-            "b": b_val,
+            "b_barrido": round(b_nominal, 2),
+            "b_utilizado": b_utilizado,
+            "b_es_original_mqtt": int(np.isclose(b_utilizado, b_original_mqtt, rtol=0.0, atol=1e-15)),
             "hamming_abs": hamming_abs,
             "hamming_norm": hamming_norm
         })
-        
+
         df_resultados = pd.DataFrame(resultados)
         df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_B, index=False)
         print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_B}")
 
         plt.figure(figsize=(10, 6))
-        plt.plot(df_resultados['b'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
-        plt.xlabel("b")
-        plt.ylabel("Distancia de Hamming")
-        plt.title("Distancia de hamming imagen original vs descifrada")
-        plt.grid(True, alpha = 0.3)
+        plt.plot(df_resultados['b_barrido'], df_resultados['hamming_abs'], marker='o', linewidth=0.8)
+        plt.xlabel("Parámetro b")
+        plt.ylabel("Distancia de Hamming absoluta")
+        plt.title("Distancia de Hamming vs parámetro b de Rössler")
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(RUTA_DISTANCIA_HAMMING_B, dpi=300)
         plt.close()
@@ -574,8 +601,7 @@ def experimento_hamming_vs_b(
 
 def experimento_hamming_vs_c(
     ROSSLER_PARAMS,
-    LOGISTIC_PARAMS,
-    y_sinc,
+    y_maestro,
     times,
     time_sinc,
     nmax,
@@ -586,169 +612,200 @@ def experimento_hamming_vs_c(
     vector_logistico
 ):
     img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
-    valores_c = np.arange(5.0, 6.0 + 1e-6, 0.02)
+
+    c_original_mqtt = float(ROSSLER_PARAMS['c'])
+    # Barrido desde 5.0 hasta 6.0 con paso de 0.02
+    valores_c_nominales = [5.0 + i * 0.02 for i in range(51)]  # 5.0, 5.02, ..., 6.0
     resultados = []
-    
+
     print("[HAMMING] Iniciando experimento de distancia de Hamming vs 'c' de Rössler...")
-    
-    for c_val in valores_c:
-        print(f"[HAMMING] Evaluando c = {c_val:.2f}...")
+    print(f"[HAMMING] Valor original de 'c' recibido por MQTT: {c_original_mqtt:.15f}")
+
+    for c_nominal in valores_c_nominales:
         params_test = dict(ROSSLER_PARAMS)
-        params_test['c'] = float(c_val)
-        
-        # Sincronizar con el nuevo c
-        _, _, y_slave, t_slave, x_sinc = sincronizacion(
-            y_sinc, times, params_test, time_sinc, keystream, nmax
+
+        if np.isclose(c_nominal, c_original_mqtt, rtol=0.0, atol=1e-12):
+            c_utilizado = c_original_mqtt
+            print(
+                f"[HAMMING] Evaluando c = {c_nominal:.2f} "
+                f"(usando valor exacto recibido por MQTT: {c_utilizado:.15f})..."
+            )
+        else:
+            c_utilizado = float(c_nominal)
+            print(f"[HAMMING] Evaluando c = {c_utilizado:.2f}...")
+
+        params_test['c'] = c_utilizado
+
+        # Sincronizar con el nuevo valor de 'c'
+        _, _, _, _, x_sinc_barrido = sincronizacion(
+            y_maestro, times, params_test, time_sinc, keystream, nmax
         )
-        # Descifrar
-        difusion = revertir_confusion(vector_cifrado, vector_logistico, x_sinc, nmax)
+
+        # Descifrar siguiendo exactamente el mismo flujo del main()
+        difusion_x = revertir_confusion(vector_cifrado, vector_logistico, x_sinc_barrido)
+        difusion = difusion_x * IMG_SCALE
         imagen_descifrada = revertir_difusion(difusion, vector_logistico, nmax, ancho, alto)
 
-        # Calcular la distancia hamming
+        # Calcular la distancia de Hamming
         hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
         resultados.append({
-            "c": c_val,
+            "c_barrido": round(c_nominal, 2),
+            "c_utilizado": c_utilizado,
+            "c_es_original_mqtt": int(np.isclose(c_utilizado, c_original_mqtt, rtol=0.0, atol=1e-15)),
             "hamming_abs": hamming_abs,
             "hamming_norm": hamming_norm
         })
-        
+
         df_resultados = pd.DataFrame(resultados)
         df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_C, index=False)
         print(f"[HAMMING] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_C}")
 
         plt.figure(figsize=(10, 6))
-        plt.plot(df_resultados['c'], df_resultados["hamming_abs"], marker = "o", linewidth = 0.8)
-        plt.xlabel("c")
-        plt.ylabel("Distancia de Hamming")
-        plt.title("Distancia de hamming imagen original vs descifrada")
-        plt.grid(True, alpha = 0.3)
+        plt.plot(df_resultados['c_barrido'], df_resultados['hamming_abs'], marker='o', linewidth=0.8)
+        plt.xlabel("Parámetro c")
+        plt.ylabel("Distancia de Hamming absoluta")
+        plt.title("Distancia de Hamming vs parámetro c de Rössler")
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(RUTA_DISTANCIA_HAMMING_C, dpi=300)
         plt.close()
         print(f"[HAMMING] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_C}")
 
-def experimento_hamming_vs_logistico(
+def experimento_hamming_vs_aLog(
     LOGISTIC_PARAMS,
     vector_cifrado,
     ancho,
     alto,
     nmax,
     x_sinc,
-    vector_logistico_original,
-    img_original
+    vector_logistico_original
 ):
-    aLog_original = float(LOGISTIC_PARAMS["aLog"])
+    """
+    Realiza un barrido del parámetro 'aLog' del mapa logístico desde 3.70
+    hasta 4.00 con paso de 0.01. Cuando el barrido llega al valor nominal
+    correspondiente al original recibido por MQTT, se utiliza exactamente
+    LOGISTIC_PARAMS['aLog'] para respetar la precisión del dato recibido.
+    """
+    img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
 
-    base_aLog = np.arange(3.97, 4.0 + 1e-6, 0.001)
-    valores_aLog = list(base_aLog)
+    aLog_original_mqtt = float(LOGISTIC_PARAMS["aLog"])
+    valores_aLog_nominales = [round(3.7 + 0.01 * i, 2) for i in range(31)]
+    resultados = []
 
-    if not any(np.isclose(aLog_original, v, atol=1e-15) for v in valores_aLog):
-        valores_aLog.append(aLog_original)
+    print("[HAMMING-LOG] Iniciando experimento de distancia de Hamming vs 'aLog'...")
+    print(f"[HAMMING-LOG] Valor original de 'aLog' recibido por MQTT: {aLog_original_mqtt:.15f}")
 
-    valores_aLog = sorted(valores_aLog)
-    resultados_aLog = []
-
-    print("[HAMMING-LOG] Iniciando experimento Hamming vs aLog del mapa logístico...")
-
-    for a_val in valores_aLog:
-        es_original = np.isclose(a_val, aLog_original, atol=1e-15)
-        if es_original:
-            print(f"[HAMMING-LOG] Evaluando aLog = {a_val:.15f} (valor ORIGINAL del maestro, reutilizando vector_logistico_original)...")
-            vector_logistico_test = vector_logistico_original
-        else:
-            print(f"[HAMMING-LOG] Evaluando aLog = {a_val:.15f}...")
-
-            params_test = dict(LOGISTIC_PARAMS)
-            params_test['aLog'] = float(a_val)
-
-            vector_logistico_test = mapa_logistico(params_test, nmax)
-
-        difusion = revertir_confusion(vector_cifrado, vector_logistico_test, x_sinc, nmax)
-        imagen_descifrada = revertir_difusion(difusion, vector_logistico_test, nmax, ancho, alto)
-
-        nombre_img = f"hamming_aLog_{a_val:.3f}".replace(".", "_") + ".png"
-        ruta_img = CARPETA_HAMMING_LOGISTIC / nombre_img
-        imagen_descifrada.save(ruta_img)
-        print(f"[HAMMING-LOG] Imagen descifrada guardada en {ruta_img}")
-
-        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
-
-        resultados_aLog.append({
-            "aLog": a_val,
-            "aLog_es_original": int(es_original),
-            "hamming_abs": hamming_abs,
-            "hamming_norm": hamming_norm
-        })
-
-    df_aLog = pd.DataFrame(resultados_aLog)
-    df_aLog.to_csv(RUTA_DISTANCIA_HAMMING_CSV_A_LOG, index=False)
-    print(f"[HAMMING-LOG] Resultados Hamming vs aLog guardados en {RUTA_DISTANCIA_HAMMING_CSV_A_LOG}")
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(df_aLog["aLog"], df_aLog["hamming_abs"], marker="o", linewidth=0.8)
-    plt.xlabel("aLog")
-    plt.ylabel("Distancia de Hamming absoluta")
-    plt.title("Distancia de Hamming imagen original vs descifrada\n(barrido en aLog del mapa logístico)")
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(RUTA_DISTANCIA_HAMMING_A_LOG, dpi=300)
-    plt.close()
-    print(f"[HAMMING-LOG] Gráfico Hamming vs aLog guardado en {RUTA_DISTANCIA_HAMMING_A_LOG}")
-
-    x0_original = float(LOGISTIC_PARAMS["x0_log"])
-    base_x0 = np.arange(0.3, 0.5 + 1e-6, 0.01)
-    valores_x0 = list(base_x0)
-    if not any(np.isclose(x0_original, v, atol=1e-15) for v in valores_x0):
-        valores_x0.append(x0_original)
-    valores_x0 = sorted(valores_x0)
-
-    resultados_x0 = []
-
-    print("[HAMMING-LOG] Iniciando experimento Hamming vs x0_log del mapa logístico...")
-
-    for x0_val in valores_x0:
-        es_original_x0 = np.isclose(x0_val, x0_original, atol=1e-15)
-        if es_original_x0:
-            print(f"[HAMMING-LOG] Evaluando x0_log = {x0_val:.15f} (valor ORIGINAL del maestro)...")
-        else:
-            print(f"[HAMMING-LOG] Evaluando x0_log = {x0_val:.15f}...")
-
+    for aLog_nominal in valores_aLog_nominales:
         params_test = dict(LOGISTIC_PARAMS)
-        params_test["x0_log"] = float(x0_val)
 
-        vector_logistico_test = mapa_logistico(params_test, nmax)
-        difusion = revertir_confusion(vector_cifrado, vector_logistico_test, x_sinc, nmax)
+        if np.isclose(aLog_nominal, aLog_original_mqtt, rtol=0.0, atol=1e-12):
+            aLog_utilizado = aLog_original_mqtt
+            vector_logistico_test = vector_logistico_original
+            print(
+                f"[HAMMING-LOG] Evaluando aLog = {aLog_nominal:.2f} "
+                f"(usando valor exacto recibido por MQTT: {aLog_utilizado:.15f})..."
+            )
+        else:
+            aLog_utilizado = float(aLog_nominal)
+            params_test['aLog'] = aLog_utilizado
+            vector_logistico_test = mapa_logistico(params_test, nmax)
+            print(f"[HAMMING-LOG] Evaluando aLog = {aLog_utilizado:.2f}...")
+
+        difusion_x = revertir_confusion(vector_cifrado, vector_logistico_test, x_sinc)
+        difusion = difusion_x * IMG_SCALE
         imagen_descifrada = revertir_difusion(difusion, vector_logistico_test, nmax, ancho, alto)
 
-        nombre_img = f"hamming_x0_log_{x0_val:.3f}".replace(".", "_") + ".png"
-        ruta_img = CARPETA_HAMMING_LOGISTIC / nombre_img
-        imagen_descifrada.save(ruta_img)
-        print(f"[HAMMING-LOG] Imagen descifrada guardada en {ruta_img}")
-
         hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
-
-        resultados_x0.append({
-            "x0_log": x0_val,
-            "x0_log_es_original": int(es_original_x0),
+        resultados.append({
+            "aLog_barrido": round(aLog_nominal, 2),
+            "aLog_utilizado": aLog_utilizado,
+            "aLog_es_original_mqtt": int(np.isclose(aLog_utilizado, aLog_original_mqtt, rtol=0.0, atol=1e-15)),
             "hamming_abs": hamming_abs,
             "hamming_norm": hamming_norm
         })
 
-    df_x0 = pd.DataFrame(resultados_x0)
-    df_x0.to_csv(RUTA_DISTANCIA_HAMMING_CSV_X0_LOG, index=False)
-    print(f"[HAMMING-LOG] Resultados Hamming vs x0_log guardados en {RUTA_DISTANCIA_HAMMING_CSV_X0_LOG}")
+        df_resultados = pd.DataFrame(resultados)
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_A_LOG, index=False)
+        print(f"[HAMMING-LOG] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_A_LOG}")
 
-    plt.figure(figsize=(10, 6))
-    plt.plot(df_x0["x0_log"], df_x0["hamming_abs"], marker="o", linewidth=0.8)
-    plt.xlabel("x0_log")
-    plt.ylabel("Distancia de Hamming absoluta")
-    plt.title("Distancia de Hamming imagen original vs descifrada\n(barrido en x0_log del mapa logístico)")
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(RUTA_DISTANCIA_HAMMING_X0_LOG, dpi=300)
-    plt.close()
-    print(f"[HAMMING-LOG] Gráfico Hamming vs x0_log guardado en {RUTA_DISTANCIA_HAMMING_X0_LOG}")
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_resultados["aLog_barrido"], df_resultados["hamming_abs"], marker="o", linewidth=0.8)
+        plt.xlabel("Parámetro aLog")
+        plt.ylabel("Distancia de Hamming absoluta")
+        plt.title("Distancia de Hamming vs parámetro aLog del mapa logístico")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(RUTA_DISTANCIA_HAMMING_A_LOG, dpi=300)
+        plt.close()
+        print(f"[HAMMING-LOG] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_A_LOG}")
 
+def experimento_hamming_vs_x0_log(
+    LOGISTIC_PARAMS,
+    vector_cifrado,
+    ancho,
+    alto,
+    nmax,
+    x_sinc,
+    vector_logistico_original
+):
+    """
+    Realiza un barrido del parámetro 'x0_log' del mapa logístico desde 0.10
+    hasta 0.90 con paso de 0.02. Cuando el barrido llega al valor nominal
+    correspondiente al original recibido por MQTT, se utiliza exactamente
+    LOGISTIC_PARAMS['x0_log'] para respetar la precisión del dato recibido.
+    """
+    img_original = Image.open(RUTA_IMAGEN_ORIGINAL)
+
+    x0_original_mqtt = float(LOGISTIC_PARAMS["x0_log"])
+    valores_x0_nominales = [round(0.1 + 0.02 * i, 2) for i in range(41)]
+    resultados = []
+
+    print("[HAMMING-LOG] Iniciando experimento de distancia de Hamming vs 'x0_log'...")
+    print(f"[HAMMING-LOG] Valor original de 'x0_log' recibido por MQTT: {x0_original_mqtt:.15f}")
+
+    for x0_nominal in valores_x0_nominales:
+        params_test = dict(LOGISTIC_PARAMS)
+
+        if np.isclose(x0_nominal, x0_original_mqtt, rtol=0.0, atol=1e-12):
+            x0_utilizado = x0_original_mqtt
+            vector_logistico_test = vector_logistico_original
+            print(
+                f"[HAMMING-LOG] Evaluando x0_log = {x0_nominal:.2f} "
+                f"(usando valor exacto recibido por MQTT: {x0_utilizado:.15f})..."
+            )
+        else:
+            x0_utilizado = float(x0_nominal)
+            params_test['x0_log'] = x0_utilizado
+            vector_logistico_test = mapa_logistico(params_test, nmax)
+            print(f"[HAMMING-LOG] Evaluando x0_log = {x0_utilizado:.2f}...")
+
+        difusion_x = revertir_confusion(vector_cifrado, vector_logistico_test, x_sinc)
+        difusion = difusion_x * IMG_SCALE
+        imagen_descifrada = revertir_difusion(difusion, vector_logistico_test, nmax, ancho, alto)
+
+        hamming_abs, hamming_norm = distancia_hamming(img_original, imagen_descifrada)
+        resultados.append({
+            "x0_log_barrido": round(x0_nominal, 2),
+            "x0_log_utilizado": x0_utilizado,
+            "x0_log_es_original_mqtt": int(np.isclose(x0_utilizado, x0_original_mqtt, rtol=0.0, atol=1e-15)),
+            "hamming_abs": hamming_abs,
+            "hamming_norm": hamming_norm
+        })
+
+        df_resultados = pd.DataFrame(resultados)
+        df_resultados.to_csv(RUTA_DISTANCIA_HAMMING_CSV_X0_LOG, index=False)
+        print(f"[HAMMING-LOG] Resultados guardados en {RUTA_DISTANCIA_HAMMING_CSV_X0_LOG}")
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_resultados["x0_log_barrido"], df_resultados["hamming_abs"], marker="o", linewidth=0.8)
+        plt.xlabel("Parámetro x0_log")
+        plt.ylabel("Distancia de Hamming absoluta")
+        plt.title("Distancia de Hamming vs parámetro x0_log del mapa logístico")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(RUTA_DISTANCIA_HAMMING_X0_LOG, dpi=300)
+        plt.close()
+        print(f"[HAMMING-LOG] Gráfico guardado en {RUTA_DISTANCIA_HAMMING_X0_LOG}")    
 
 def main():
     global RECEIVED_KEYS, RECEIVED_DATA
@@ -864,55 +921,62 @@ def main():
     print(f"[TIEMPOS] Tiempo total: {tiempo_total:.4f} segundos")
     tiempos_procesos(tiempo_mqtt, tiempo_sincronizacion, tiempo_descifrado, tiempo_total)
 
-    # experimento_hamming_vs_a(
-    #     ROSSLER_PARAMS,
-    #     LOGISTIC_PARAMS,
-    #     y_maestro,
-    #     t_maestro,
-    #     tiempo_sinc,
-    #     nmax,
-    #     keystream,
-    #     vector_cifrado,
-    #     ancho,
-    #     alto,
-    #     vector_logistico
-    # )
-    # experimento_hamming_vs_b(
-    #     ROSSLER_PARAMS,
-    #     LOGISTIC_PARAMS,
-    #     y_maestro,
-    #     t_maestro,
-    #     time_sinc,
-    #     nmax,
-    #     keystream,
-    #     vector_cifrado,
-    #     ancho,
-    #     alto,
-    #     vector_logistico
-    # )
-    # experimento_hamming_vs_c(
-    #     ROSSLER_PARAMS,
-    #     LOGISTIC_PARAMS,
-    #     y_maestro,
-    #     t_maestro,
-    #     time_sinc,
-    #     nmax,
-    #     keystream,
-    #     vector_cifrado,
-    #     ancho,
-    #     alto,
-    #     vector_logistico
-    # )
-    # experimento_hamming_vs_logistico(
-    #     LOGISTIC_PARAMS,
-    #     vector_cifrado,
-    #     ancho,
-    #     alto,
-    #     nmax,
-    #     x_sinc,
-    #     vector_logistico,
-    #     img_original_base
-    # )
+    experimento_hamming_vs_a(
+    ROSSLER_PARAMS,
+    y_maestro,
+    t_maestro,
+    tiempo_sinc,
+    nmax,
+    keystream,
+    vector_cifrado,
+    ancho,
+    alto,
+    vector_logistico
+)
+    
+    experimento_hamming_vs_b(
+    ROSSLER_PARAMS,
+    y_maestro,
+    t_maestro,
+    tiempo_sinc,
+    nmax,
+    keystream,
+    vector_cifrado,
+    ancho,
+    alto,
+    vector_logistico
+)
+    
+    experimento_hamming_vs_c(
+    ROSSLER_PARAMS,
+    y_maestro,
+    t_maestro,
+    tiempo_sinc,
+    nmax,
+    keystream,
+    vector_cifrado,
+    ancho,
+    alto,
+    vector_logistico
+)
+    experimento_hamming_vs_aLog(
+    LOGISTIC_PARAMS,
+    vector_cifrado,
+    ancho,
+    alto,
+    nmax,
+    x_sinc,
+    vector_logistico
+)
+    experimento_hamming_vs_x0_log(
+    LOGISTIC_PARAMS,
+    vector_cifrado,
+    ancho,
+    alto,
+    nmax,
+    x_sinc,
+    vector_logistico
+)
 
 if __name__ == "__main__":
     main()
