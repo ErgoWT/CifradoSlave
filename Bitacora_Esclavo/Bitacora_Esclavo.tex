@@ -808,33 +808,74 @@ y_maestro_interp = interp1d(
 	
 	Un coeficiente cercano a 1.0 indica alta similitud entre las imágenes.
 	
-	\section{Análisis de Sensibilidad (Pendiente)}
+	\section{Análisis de Sensibilidad}
 	
 	\subsection{Descripción del Proceso}
 	
 	Estos experimentos evalúan cómo pequeños cambios en los parámetros afectan la calidad del descifrado.
 	
-	\subsection{Experimentos realizados}
+	\subsection{Resultados del Barrido de Parámetros}
 	
-	\subsubsection{Sensibilidad al Parámetro 'a' de Rössler}
+	Para cada parámetro del sistema, se realizó un barrido variando únicamente dicho parámetro mientras los demás se mantienen en su valor original recibido por MQTT. En cada punto del barrido se ejecuta el proceso completo de descifrado y se calcula la distancia de Hamming entre la imagen original y la imagen descifrada resultante.
 	
-	Se varía el parámetro $a$ en el rango [0, 1] con incrementos de 0.02 y se calcula la distancia de Hamming para cada valor. Esto demuestra la sensibilidad del sistema a las condiciones de los parámetros.
+	\subsubsection{Barrido del Parámetro $a$ de Rössler}
 	
-	\subsubsection{Sensibilidad al Parámetro 'b' de Rössler}
+	Se varió $a$ en el rango $[0.02,\, 1.00]$ con paso de $0.02$ (50 puntos). Cuando el valor del barrido coincide con el valor original recibido por MQTT, la imagen es recuperada.
 	
-	Similar al anterior, pero variando el parámetro $b$.
+	\begin{figure}[H]
+		\centering
+		\includegraphics[width=0.75\textwidth]{hamming_vs_a.png}
+		\caption{Distancia de Hamming vs parámetro $a$ de Rössler}
+		\label{fig:hamming_a}
+	\end{figure}
 	
-	\subsubsection{Sensibilidad al Parámetro 'c' de Rössler}
+	\subsubsection{Barrido del Parámetro $b$ de Rössler}
 	
-	Similar a los anteriores, pero variando el parámetro $c$.
+	Se varió $b$ en el rango $[0.02,\, 1.00]$ con paso de $0.02$ (50 puntos), bajo el mismo criterio de precisión para el valor original.
 	
-	\subsubsection{Sensibilidad a Parámetros del Mapa Logístico}
+	\begin{figure}[H]
+		\centering
+		\includegraphics[width=0.75\textwidth]{hamming_vs_b.png}
+		\caption{Distancia de Hamming vs parámetro $b$ de Rössler}
+		\label{fig:hamming_b}
+	\end{figure}
 	
-	Se evalúa la sensibilidad a:
-	\begin{itemize}
-		\item Parámetro $a_{\text{log}}$ (tasa de crecimiento)
-		\item Condición inicial $x_0$
-	\end{itemize}
+	\subsubsection{Barrido del Parámetro $c$ de Rössler}
+	
+	Se varió $c$ en el rango $[5.0,\, 6.0]$ con paso de $0.02$ (51 puntos).
+	
+	\begin{figure}[H]
+		\centering
+		\includegraphics[width=0.75\textwidth]{hamming_vs_c.png}
+		\caption{Distancia de Hamming vs parámetro $c$ de Rössler}
+		\label{fig:hamming_c}
+	\end{figure}
+	
+	\subsubsection{Barrido del Parámetro $a_{\text{log}}$ del Mapa Logístico}
+	
+	Se varió $a_{\text{log}}$ en el rango $[3.70,\, 4.00]$ con paso de $0.01$ (31 puntos). En este caso la sincronización de Rössler se mantiene fija (se reutiliza $x_{\text{sinc}}$ ya calculado) y solo se regenera el vector logístico con el nuevo valor de $a_{\text{log}}$.
+	
+	\begin{figure}[H]
+		\centering
+		\includegraphics[width=0.75\textwidth]{hamming_vs_aLog.png}
+		\caption{Distancia de Hamming vs parámetro $a_{\text{log}}$ del mapa logístico}
+		\label{fig:hamming_aLog}
+	\end{figure}
+	
+	\subsubsection{Barrido del Parámetro $x_0$ del Mapa Logístico}
+	
+	Se varió $x_0$ en el rango $[0.10,\, 0.90]$ con paso de $0.02$ (41 puntos). De igual forma, la sincronización de Rössler permanece fija y solo se regenera el vector logístico con la nueva condición inicial.
+	
+	\begin{figure}[H]
+		\centering
+		\includegraphics[width=0.75\textwidth]{hamming_vs_x0_log.png}
+		\caption{Distancia de Hamming vs condición inicial $x_0$ del mapa logístico}
+		\label{fig:hamming_x0}
+	\end{figure}
+	
+	\subsubsection{Observaciones Generales}
+	
+	En los cinco barridos se observa que únicamente cuando el parámetro coincide exactamente con el valor original la distancia de Hamming cae a cero. Cualquier desviación, incluso mínima, produce una distancia de Hamming elevada y prácticamente constante, lo que confirma la alta sensibilidad del sistema criptográfico a cada uno de sus parámetros.
 	
 	\subsection{Importancia del Análisis de Sensibilidad}
 	
@@ -843,30 +884,7 @@ y_maestro_interp = interp1d(
 	\begin{itemize}
 		\item \textbf{Alta sensibilidad a parámetros:} Un cambio mínimo en cualquier parámetro resulta en una imagen completamente diferente
 		\item \textbf{Espacio de claves amplio:} Los parámetros continuos ofrecen un espacio de claves prácticamente infinito
-		\item \textbf{Seguridad criptográfica:} La sensibilidad extrema hace que ataques por fuerza bruta sean computacionalmente inviables
 	\end{itemize}
-	
-	\section{Registro de Tiempos de Ejecución}
-	
-	\subsection{Mediciones de Rendimiento}
-	
-	El sistema registra los tiempos de ejecución de cada fase del proceso:
-	
-	\begin{table}[H]
-		\centering
-		\caption{Tiempos de ejecución por fase del proceso}
-		\label{tab:tiempos}
-		\begin{tabular}{@{}ll@{}}
-			\toprule
-			\textbf{Fase} & \textbf{Descripción} \\ \midrule
-			tiempo\_mqtt & Tiempo de conexión y recepción de datos vía MQTT \\
-			tiempo\_sincronizacion & Tiempo de sincronización del oscilador de Rössler \\
-			tiempo\_descifrado & Tiempo de descifrado (confusión y difusión) \\
-			tiempo\_total & Tiempo total del programa \\ \bottomrule
-		\end{tabular}
-	\end{table}
-	
-	Estos tiempos se guardan en un archivo CSV que permite evaluar el rendimiento del sistema y detectar posibles cuellos de botella.
 	
 	\section{Resumen del Proceso Completo}
 	

@@ -1,0 +1,482 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{courier}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{hyperref}
+\hypersetup{
+	colorlinks=true,
+	linkcolor=black,
+	urlcolor=cyan,
+	pdftitle={Interpolación cúbica y sincronización del sistema esclavo de Rössler},
+	pdfsubject={Sincronización maestro-esclavo, interpolación spline},
+	pdfkeywords={Rössler, spline cúbico, sincronización, Pecora-Carroll, interp1d}
+}
+\usepackage{fancyhdr}
+
+\lstset{
+	language=Python,
+	basicstyle=\ttfamily\small,
+	keywordstyle=\color{blue}\bfseries,
+	commentstyle=\color{green!60!black}\itshape,
+	stringstyle=\color{red},
+	numbers=left,
+	numberstyle=\tiny\color{gray},
+	numbersep=8pt,
+	backgroundcolor=\color{gray!10},
+	showstringspaces=false,
+	frame=single,
+	tabsize=4,
+	captionpos=b,
+	breaklines=true,
+	xleftmargin=2em,
+	framexleftmargin=1.5em
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Interpolación cúbica y sincronización}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\textbf{Interpolación cúbica y sincronización\\ del sistema esclavo de Rössler}\\[0.3cm]
+\large Fundamento matemático y su implementación en el receptor}
+\author{Proyecto: Encriptación con sistema dinámico de Rössler}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent
+El sistema esclavo debe reconstruir la señal caótica que se utilizó para cifrar la imagen. Para lograrlo integra su propio sistema de Rössler forzado por una señal de acoplamiento procedente del maestro. Sin embargo, esa señal no llega como una función continua, sino como una lista finita de muestras transmitidas por MQTT. Este documento explica por qué es necesario reconstruir una función continua a partir de esas muestras, en qué consiste matemáticamente la interpolación por splines cúbicos, y cómo la calidad de esa reconstrucción determina la precisión de la sincronización y, en última instancia, la fidelidad de la imagen descifrada. La descripción se apoya en el programa \texttt{Esclavo\_TLS KEYSTREAM.py}.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% =====================================================================
+\section{El problema a resolver}
+% =====================================================================
+
+\subsection{Los dos sistemas}
+
+El maestro integra el sistema de Rössler autónomo:
+\begin{equation}
+\begin{aligned}
+\dot{x}_m &= -y_m - z_m,\\
+\dot{y}_m &= x_m + a\,y_m,\\
+\dot{z}_m &= b + z_m\,(x_m - c),
+\end{aligned}
+\label{eq:maestro}
+\end{equation}
+con $a = 0.2$, $b = 0.2$, $c = 5.7$ y condición inicial $(0.1,\,0.1,\,0.1)$. La componente $x_m$ resultante es la que se suma a la imagen difundida durante la etapa de confusión.
+
+El esclavo integra un sistema estructuralmente idéntico, pero con un término adicional de acoplamiento en la segunda ecuación:
+\begin{equation}
+\begin{aligned}
+\dot{x}_s &= -y_s - z_s,\\
+\dot{y}_s &= x_s + a\,y_s + K\,\bigl(y_m(t) - y_s\bigr),\\
+\dot{z}_s &= b + z_s\,(x_s - c),
+\end{aligned}
+\label{eq:esclavo}
+\end{equation}
+con $K = 2.0$ y condición inicial $(1.0,\,1.0,\,1.0)$, distinta de la del maestro. Esta discrepancia deliberada en las condiciones iniciales es lo que permite verificar que la convergencia observada se debe efectivamente al acoplamiento y no a una coincidencia de arranque.
+
+En el código, la ecuación~\eqref{eq:esclavo} aparece así:
+
+\begin{lstlisting}[caption={Campo vectorial del sistema esclavo}]
+def rossler_esclavo(t, state, y_master_interp, a, b, c, k):
+    x_s, y_s, z_s = state
+    y_m = y_master_interp(t)
+    dxdt = -y_s - z_s
+    dydt = x_s + a * y_s + k * (y_m - y_s)
+    dzdt = b + z_s * (x_s - c)
+    return [dxdt, dydt, dzdt]
+\end{lstlisting}
+
+\subsection{La dificultad}
+
+El término $K\,(y_m(t) - y_s)$ exige conocer el valor de $y_m$ \textbf{en cualquier instante $t$}. El esclavo, en cambio, solo dispone de un conjunto finito de pares
+\begin{equation}
+\{(t_i,\; y_i)\}_{i=0}^{N-1}, \qquad y_i = y_m(t_i),
+\end{equation}
+recibidos dentro del payload JSON en los campos \texttt{y\_maestro} y \texttt{t\_maestro}. En la configuración del experimento hay
+\begin{equation}
+N = \text{TIEMPO\_SINC} + \text{KEYSTREAM} = 6000 + 30000 = 36000
+\end{equation}
+muestras, uniformemente espaciadas con paso
+\begin{equation}
+h = t_{i+1} - t_i = 0.01,
+\end{equation}
+cubriendo el intervalo temporal $[0,\,360]$.
+
+El problema es que el integrador \texttt{solve\_ivp} con método RK45 \textbf{no evalúa el campo vectorial únicamente en los nodos $t_i$}. El método de Runge--Kutta de orden 5(4) de Dormand--Prince calcula, dentro de cada paso $[t_n,\, t_n + \Delta t]$, siete etapas intermedias situadas en
+\begin{equation}
+t_n + c_j\,\Delta t, \qquad c = \left(0,\; \tfrac{1}{5},\; \tfrac{3}{10},\; \tfrac{4}{5},\; \tfrac{8}{9},\; 1,\; 1\right).
+\end{equation}
+Los valores $c_2 = 0.2$, $c_3 = 0.3$, $c_4 = 0.8$ y $c_5 \approx 0.889$ caen \textbf{estrictamente entre} dos nodos consecutivos. A esto se añade que RK45 emplea paso adaptativo: $\Delta t$ cambia continuamente y no guarda ninguna relación con $h = 0.01$.
+
+En consecuencia, el integrador solicitará valores de $y_m$ en instantes para los cuales no existe ninguna muestra. Se necesita entonces una función continua $\tilde{y}_m(t)$ que coincida con los datos en los nodos y que proporcione valores razonables en los puntos intermedios. Esa función es el \textbf{interpolante}.
+
+% =====================================================================
+\section{Interpolación por splines cúbicos}
+% =====================================================================
+
+\subsection{Definición}
+
+Un spline cúbico $S(t)$ sobre la partición $t_0 < t_1 < \dots < t_{N-1}$ es una función definida a trozos: en cada subintervalo $[t_i,\, t_{i+1}]$ se comporta como un polinomio de tercer grado
+\begin{equation}
+S_i(t) = \alpha_i + \beta_i\,(t - t_i) + \gamma_i\,(t - t_i)^2 + \delta_i\,(t - t_i)^3,
+\label{eq:trozo}
+\end{equation}
+y los distintos trozos se ensamblan de modo que el resultado global sea suave.
+
+Con $N$ nodos hay $n = N-1$ subintervalos y, por tanto, $4n$ coeficientes desconocidos. Estos quedan determinados por las siguientes condiciones:
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l c X@{}}
+\toprule
+\textbf{Condición} & \textbf{N.º de ecuaciones} & \textbf{Significado} \\
+\midrule
+$S_i(t_i) = y_i$ y $S_i(t_{i+1}) = y_{i+1}$ & $2n$ & El spline pasa exactamente por cada muestra. \\
+$S'_{i-1}(t_i) = S'_i(t_i)$ & $n-1$ & Sin cambios bruscos de pendiente en los nodos. \\
+$S''_{i-1}(t_i) = S''_i(t_i)$ & $n-1$ & Sin cambios bruscos de curvatura. \\
+Condiciones de frontera & $2$ & Cierran el sistema en los extremos. \\
+\midrule
+\textbf{Total} & $4n$ & Sistema determinado. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+El resultado es una función de clase $C^2$: continua, con primera derivada continua y con segunda derivada continua. Esta propiedad es la que la distingue de alternativas más simples y, como se verá, la que resulta decisiva en este contexto.
+
+La construcción no requiere resolver un sistema denso de $4n$ ecuaciones. Reordenando las condiciones en términos de las segundas derivadas $M_i = S''(t_i)$ se obtiene un sistema \textbf{tridiagonal} que, para nodos equiespaciados, adopta la forma
+\begin{equation}
+M_{i-1} + 4\,M_i + M_{i+1} = \frac{6}{h^2}\,\bigl(y_{i-1} - 2\,y_i + y_{i+1}\bigr),
+\qquad i = 1,\dots,n-1,
+\label{eq:tridiag}
+\end{equation}
+resoluble en $\mathcal{O}(N)$ operaciones mediante el algoritmo de Thomas. Para $N = 36000$ esto es prácticamente instantáneo, lo cual justifica que el costo de la interpolación sea despreciable frente al de la integración.
+
+\subsection{Naturaleza no local del spline}
+
+Conviene notar una consecuencia del sistema~\eqref{eq:tridiag}: los coeficientes de cada trozo dependen de \textbf{todas} las muestras, no solo de las vecinas inmediatas. Modificar un único valor $y_k$ altera, en principio, el spline completo, aunque el efecto decae de forma exponencial con la distancia al nodo perturbado (aproximadamente con factor $(2-\sqrt{3})^{|i-k|} \approx 0.268^{|i-k|}$).
+
+Esto tiene una lectura práctica en el experimento: un error aislado en la transmisión de una muestra de \texttt{y\_maestro} no queda confinado a un subintervalo, pero tampoco contamina toda la señal. Su influencia se extingue tras unos pocos nodos.
+
+\subsection{Precisión}
+
+Si la función original $y_m$ es suficientemente derivable, el error del spline cúbico satisface la cota clásica
+\begin{equation}
+\max_{t \in [t_0,\, t_{N-1}]} \bigl|y_m(t) - S(t)\bigr| \;\leq\; \frac{5}{384}\,h^4\,\max\bigl|y_m^{(4)}(t)\bigr|.
+\label{eq:cotacubica}
+\end{equation}
+
+El punto esencial es la dependencia $h^4$: reducir el paso a la mitad divide el error entre dieciséis. Con $h = 0.01$ se tiene $h^4 = 10^{-8}$, un factor extremadamente pequeño.
+
+Para contrastar, la interpolación lineal —unir las muestras con segmentos rectos— tiene una cota
+\begin{equation}
+\max\bigl|y_m(t) - L(t)\bigr| \;\leq\; \frac{1}{8}\,h^2\,\max\bigl|y_m''(t)\bigr|,
+\label{eq:cotalineal}
+\end{equation}
+con dependencia $h^2$: reducir el paso a la mitad solo divide el error entre cuatro.
+
+\subsection{Verificación numérica sobre la señal del experimento}
+
+Las cotas anteriores son generales. Aplicadas a la trayectoria concreta del maestro producen los siguientes valores. Se integró el sistema~\eqref{eq:maestro} con los parámetros del experimento, se construyeron ambos interpolantes sobre las 36000 muestras y se evaluaron en los puntos medios de cada subintervalo, comparando contra la solución densa del integrador tomada como referencia.
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l c c X@{}}
+\toprule
+\textbf{Método} & \textbf{Error máximo} & \textbf{Error RMS} & \textbf{Cota teórica} \\
+\midrule
+Spline cúbico & $3.0 \times 10^{-7}$ & $6.9 \times 10^{-9}$ & $1.4 \times 10^{-6}$ \\
+Lineal        & $2.9 \times 10^{-4}$ & $7.0 \times 10^{-5}$ & $2.9 \times 10^{-4}$ \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Ambos resultados respetan sus cotas respectivas. La diferencia práctica es de casi tres órdenes de magnitud: el spline cúbico es unas $950$ veces más preciso que la interpolación lineal sobre esta misma señal y con el mismo espaciado.
+
+La comparación relevante, sin embargo, no es entre ambos métodos sino frente a las tolerancias del integrador. El programa fija \texttt{rtol = 1e-5} y \texttt{atol = 1e-6}, y la amplitud típica de $y_m$ es del orden de $10$, de modo que el error admitido por paso ronda $10^{-4}$. Se concluye que:
+
+\begin{itemize}[leftmargin=1.4cm]
+	\item Con \textbf{spline cúbico}, el error de interpolación ($\sim 10^{-7}$) es unas mil veces menor que la tolerancia del integrador. La interpolación no es el factor limitante.
+	\item Con \textbf{interpolación lineal}, el error ($\sim 10^{-4}$) es comparable a la tolerancia. El integrador perseguiría una precisión que la propia señal de entrada no posee.
+\end{itemize}
+
+\subsection{Suavidad y control de paso}
+
+Hay un segundo motivo, independiente de la precisión, para preferir el spline cúbico. El controlador de paso adaptativo de RK45 estima el error local comparando dos soluciones de órdenes 4 y 5, y ajusta $\Delta t$ suponiendo que el campo vectorial es suave.
+
+La interpolación lineal produce una función continua pero con derivada discontinua en cada nodo: en cada $t_i$ hay un quiebre. Cuando un paso de integración atraviesa uno de esos quiebres, la estimación de error se dispara y el controlador reduce $\Delta t$. El spline cúbico, al ser $C^2$, no presenta quiebres y permite pasos largos donde la dinámica lo consiente.
+
+Conviene, sin embargo, precisar el alcance real de este efecto, porque depende de la tolerancia exigida. Midiendo el número de evaluaciones del campo vectorial necesarias para integrar el esclavo sobre una misma ventana se obtiene:
+
+\begin{center}
+\begin{tabularx}{0.9\textwidth}{@{}c c c c@{}}
+\toprule
+\texttt{rtol} & \textbf{Cúbico} & \textbf{Lineal} & \textbf{Sobrecosto} \\
+\midrule
+$10^{-5}$  & $2\,108$  & $2\,108$   & $1.00\times$ \\
+$10^{-7}$  & $5\,372$  & $5\,708$   & $1.06\times$ \\
+$10^{-8}$  & $8\,210$  & $18\,104$  & $2.21\times$ \\
+$10^{-9}$  & $12\,644$ & $52\,454$  & $4.15\times$ \\
+$10^{-11}$ & $31\,268$ & $270\,320$ & $8.65\times$ \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+La penalización es real y llega a ser considerable, pero \textbf{solo se manifiesta a partir de $\texttt{rtol} \approx 10^{-8}$}. A la tolerancia efectivamente empleada en el experimento ($\texttt{rtol} = 10^{-5}$) ambos interpolantes tienen exactamente el mismo costo: el controlador no llega a percibir los quiebres, porque las discrepancias que introducen quedan por debajo del umbral que él mismo tolera.
+
+La conclusión honesta es entonces que, en la configuración de este experimento, la ventaja del spline cúbico reside \textbf{en la precisión y no en la eficiencia}. El argumento de suavidad conserva su validez teórica y pasaría a ser determinante si se decidiera endurecer las tolerancias del integrador.
+
+% =====================================================================
+\section{Implementación en el receptor}
+% =====================================================================
+
+\subsection{Construcción del interpolante}
+
+\begin{lstlisting}[caption={Interpolante e integración del sistema esclavo}]
+y_maestro_interp = interp1d(
+    times,
+    y_maestro,
+    kind='cubic',
+    fill_value="extrapolate"
+)
+
+sol_esclavo = solve_ivp(
+    fun=rossler_esclavo,
+    t_span=t_span,
+    y0=X0,
+    t_eval=t_eval,
+    args=(y_maestro_interp,
+          ROSSLER_PARAMS['a'],
+          ROSSLER_PARAMS['b'],
+          ROSSLER_PARAMS['c'],
+          K),
+    rtol=1e-5,
+    atol=1e-6,
+    method='RK45'
+)
+\end{lstlisting}
+
+Los elementos a destacar:
+
+\begin{itemize}[leftmargin=1.4cm]
+	\item \texttt{kind='cubic'} selecciona el spline cúbico descrito en la sección anterior. La construcción del sistema tridiagonal se realiza una sola vez, al crear el objeto; cada evaluación posterior consiste únicamente en localizar el subintervalo y evaluar el polinomio~\eqref{eq:trozo}, con costo $\mathcal{O}(\log N)$ por llamada.
+
+	\item \texttt{fill\_value="extrapolate"} determina el comportamiento fuera del rango $[t_0,\, t_{N-1}]$. El integrador puede solicitar, en el último paso, un instante marginalmente superior a $t_{N-1}$; sin esta opción la llamada produciría un error y la integración se detendría. Con ella, se prolonga el polinomio del último trozo. Es importante entender que la extrapolación de un polinomio cúbico diverge con rapidez y \textbf{no es fiable a distancias apreciables}: aquí resulta admisible únicamente porque el exceso es del orden de una fracción de $h$.
+
+	\item El objeto \texttt{y\_maestro\_interp} se pasa a \texttt{solve\_ivp} como argumento y se invoca en cada evaluación del campo vectorial. Para 36000 pasos con siete etapas cada uno, se realizan del orden de $2.5 \times 10^{5}$ evaluaciones del spline.
+\end{itemize}
+
+\subsection{Malla de salida}
+
+El vector \texttt{t\_eval} se define como
+\begin{lstlisting}
+t_eval = np.linspace(0, iteraciones*H, iteraciones)
+\end{lstlisting}
+es decir, sobre la misma malla que el maestro. Esto permite comparar directamente ambas trayectoria a trayectoria, sin necesidad de una segunda interpolación:
+\begin{lstlisting}
+error_x = np.abs(x_maestro - x_esclavo)
+\end{lstlisting}
+
+Conviene subrayar que \texttt{t\_eval} controla únicamente \textbf{dónde se reportan} los resultados, no dónde se calculan. Internamente, RK45 avanza con su propio paso adaptativo y produce los valores solicitados mediante interpolación densa. La necesidad del spline sobre $y_m$ persiste íntegramente.
+
+% =====================================================================
+\section{Dinámica de la sincronización}
+% =====================================================================
+
+\subsection{Ecuación del error}
+
+Se define el error de sincronización componente a componente:
+\begin{equation}
+e_x = x_s - x_m, \qquad e_y = y_s - y_m, \qquad e_z = z_s - z_m.
+\end{equation}
+
+Restando~\eqref{eq:maestro} de~\eqref{eq:esclavo}, y suponiendo por el momento que el esclavo dispone de la señal exacta $y_m(t)$, se obtiene
+\begin{equation}
+\begin{aligned}
+\dot{e}_x &= -e_y - e_z,\\
+\dot{e}_y &= e_x + a\,e_y - K\,e_y = e_x + (a - K)\,e_y,\\
+\dot{e}_z &= z_s\,(x_s - c) - z_m\,(x_m - c).
+\end{aligned}
+\label{eq:error}
+\end{equation}
+
+La segunda ecuación revela el mecanismo. El coeficiente que multiplica a $e_y$ pasa de $a = 0.2$ (positivo, expansivo) a
+\begin{equation}
+a - K = 0.2 - 2.0 = -1.8,
+\end{equation}
+decididamente negativo. El acoplamiento convierte una dirección inestable en contractiva: cualquier discrepancia en $y$ tiende a extinguirse. A través de la estructura del sistema, esta contracción arrastra también a $e_x$ y $e_z$ hacia cero.
+
+Formalmente, la condición de sincronización se expresa mediante los \textbf{exponentes de Lyapunov condicionales} del sistema de error~\eqref{eq:error}: si todos son negativos, la variedad de sincronización $e = 0$ es asintóticamente estable. El valor $K = 2.0$ se sitúa dentro del rango que garantiza esa condición para los parámetros empleados.
+
+\subsection{Transitorio y ventana útil}
+
+La convergencia no es instantánea. El error decae aproximadamente de forma exponencial,
+\begin{equation}
+\|e(t)\| \sim \|e(0)\|\; e^{-\lambda t},
+\end{equation}
+donde $\lambda > 0$ depende de $K$ y de los parámetros del sistema. Como el esclavo arranca en $(1,1,1)$ frente a $(0.1,0.1,0.1)$ del maestro, el error inicial es apreciable y se requiere un intervalo de espera antes de que las trayectorias sean utilizables.
+
+Esa espera es precisamente el papel de \texttt{TIEMPO\_SINC = 6000}, equivalente a $60$ unidades de tiempo. El código descarta ese tramo:
+\begin{lstlisting}
+x_sinc = sol_esclavo.y[0][time_sinc:]
+x_sinc = np.resize(x_sinc, nmax)
+\end{lstlisting}
+
+Solo los $30000$ puntos posteriores (\texttt{KEYSTREAM}) se emplean para el descifrado, y \texttt{np.resize} los repite cíclicamente hasta cubrir los $n_{\max}$ valores de la imagen. La operación es idéntica en el maestro, lo cual asegura que ambos extremos utilicen exactamente el mismo segmento de señal.
+
+\subsection{Efecto del error de interpolación}
+
+Cuando el esclavo no dispone de $y_m$ exacta sino de $\tilde{y}_m = S(t)$, la ecuación del error incorpora un término de forzamiento:
+\begin{equation}
+\dot{e}_y = e_x + (a - K)\,e_y + K\,\varepsilon(t),
+\qquad \varepsilon(t) = S(t) - y_m(t).
+\label{eq:forzado}
+\end{equation}
+
+El sistema deja de converger a cero y se estabiliza en torno a un valor residual proporcional a $\|\varepsilon\|_{\infty}$. Un análisis estático —suponiendo $\varepsilon$ constante— sugeriría una constante de proporcionalidad
+\begin{equation}
+\frac{K}{|a - K|} = \frac{2.0}{1.8} \approx 1.11 .
+\end{equation}
+
+Esa estimación, sin embargo, \textbf{no es aplicable aquí}, y conviene entender por qué. El error de interpolación no es una perturbación lenta: se anula en cada nodo y alcanza su máximo hacia el centro de cada subintervalo, de modo que oscila con período aproximadamente $h$, es decir a una frecuencia angular $\omega \approx 2\pi/h \approx 628$. La dinámica del error posee un polo en $-(K-a) = -1.8$ y actúa por tanto como un filtro pasa-bajas frente a esa perturbación:
+\begin{equation}
+|G(j\omega)| = \frac{K}{\sqrt{\omega^2 + (K-a)^2}}
+\;\approx\; \frac{2.0}{628} \;\approx\; 3\times 10^{-3}.
+\label{eq:filtro}
+\end{equation}
+
+La perturbación es tan rápida que el sistema apenas la sigue: la atenúa en unos dos órdenes y medio de magnitud. Un barrido del paso de muestreo confirma esta lectura. Midiendo el piso del error de sincronización frente al error de interpolación se obtiene una relación estrictamente proporcional con constante
+\begin{equation}
+\|e_x\| \;\approx\; 7\times 10^{-3}\;\|\varepsilon\|_{\infty},
+\end{equation}
+del mismo orden que predice~\eqref{eq:filtro} y muy alejada del valor estático $1.11$.
+
+\begin{center}
+\begin{tabularx}{0.9\textwidth}{@{}c c c c@{}}
+\toprule
+$h$ & $\|\varepsilon\|_{\infty}$ & \textbf{Piso de $|e_x|$} & \textbf{Razón} \\
+\midrule
+$0.08$ & $6.9\times10^{-5}$ & $4.2\times10^{-7}$  & $0.006$ \\
+$0.05$ & $9.6\times10^{-6}$ & $6.4\times10^{-8}$  & $0.007$ \\
+$0.03$ & $1.2\times10^{-6}$ & $8.3\times10^{-9}$  & $0.007$ \\
+$0.02$ & $2.4\times10^{-7}$ & $1.6\times10^{-9}$  & $0.007$ \\
+$0.01$ & $1.5\times10^{-8}$ & $1.0\times10^{-10}$ & $0.007$ \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+La conclusión cualitativa se mantiene y queda ahora cuantificada con precisión: \textbf{el error de interpolación fija un piso proporcional para la sincronización}. La constante de proporcionalidad, no obstante, es favorable, porque el propio sistema filtra buena parte de la perturbación.
+
+\subsection{Cuál es el factor limitante en el experimento}
+
+Los valores anteriores se midieron integrando con tolerancias muy estrictas, de modo que el único limitante fuera la interpolación. Con las tolerancias reales del programa ($\texttt{rtol}=10^{-5}$, $\texttt{atol}=10^{-6}$) el resultado es distinto:
+
+\begin{center}
+\begin{tabularx}{0.92\textwidth}{@{}l c X@{}}
+\toprule
+\textbf{Interpolación} & \textbf{Piso de $|e_x|$} & \textbf{Factor limitante} \\
+\midrule
+Cúbica & $3.8\times10^{-6}$ & Tolerancia del integrador \\
+Lineal & $4.8\times10^{-5}$ & Error de interpolación \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Es decir: con spline cúbico la interpolación deja de ser el cuello de botella y el residuo lo determina el propio integrador. Con interpolación lineal, en cambio, el error del interpolante domina y degrada el resultado en algo más de un orden de magnitud.
+
+% =====================================================================
+\section{Del error de sincronización al error en la imagen}
+% =====================================================================
+
+\subsection{Propagación}
+
+El descifrado invierte la etapa de confusión mediante una resta directa:
+\begin{lstlisting}
+def revertir_confusion(vector_cifrado, vector_logistico, x_sinc):
+    difusion = vector_cifrado - vector_logistico - x_sinc
+    return difusion
+\end{lstlisting}
+
+Dado que el maestro construyó el vector cifrado como
+\begin{equation}
+v_i = d_i + \ell_i + x_{m,i},
+\end{equation}
+la resta en el esclavo produce
+\begin{equation}
+\tilde{d}_i = v_i - \ell_i - x_{s,i} = d_i + \bigl(x_{m,i} - x_{s,i}\bigr) = d_i - e_{x,i}.
+\end{equation}
+
+El error de sincronización se traslada \textbf{aditivamente y sin amplificación} a cada valor de la imagen difundida. No hay realimentación ni acumulación: cada muestra se ve afectada por su propio $e_{x,i}$.
+
+\subsection{Escalado y cuantización}
+
+El programa aplica a continuación
+\begin{lstlisting}
+difusion = difusion_x * IMG_SCALE   # IMG_SCALE = 100
+\end{lstlisting}
+que compensa el factor $0.01$ aplicado por el maestro. Este escalado \textbf{multiplica también el error} por 100. Finalmente, la reconstrucción cuantiza a enteros de 8 bits:
+\begin{lstlisting}
+img_array = np.round(vector_temp * 255.0).clip(0, 255).astype(np.uint8)
+\end{lstlisting}
+
+Un valor de píxel se altera únicamente si el error acumulado supera medio nivel de cuantización, es decir
+\begin{equation}
+100 \times \|e_x\|_{\infty} \times 255 \;>\; 0.5
+\quad \Longleftrightarrow \quad
+\|e_x\|_{\infty} \;>\; 1.96 \times 10^{-5}.
+\end{equation}
+
+Comparando con los residuos estimados en la sección anterior:
+
+\begin{itemize}[leftmargin=1.4cm]
+	\item Con interpolación cúbica, el piso medido $\|e_x\| \approx 3.8 \times 10^{-6}$ queda unas cinco veces por debajo del umbral. La imagen se recupera sin alteración perceptible y la distancia de Hamming respecto de la original es prácticamente nula.
+	\item Con interpolación lineal, $\|e_x\| \approx 4.8 \times 10^{-5}$ supera el umbral por un factor de aproximadamente $2.5$. Aparecen desviaciones de un nivel de intensidad en una fracción apreciable de los píxeles, detectables en la distancia de Hamming y en el diagrama de dispersión píxel a píxel.
+\end{itemize}
+
+Este cálculo explica por qué la elección del método de interpolación —una decisión aparentemente técnica y menor— tiene consecuencias directas y medibles sobre el resultado del experimento. El proyecto conserva variantes sin interpolación (\texttt{Esclavo\_TLS KEYSTREAM NoInterp.py}) precisamente para poder contrastar este efecto.
+
+\subsection{Sensibilidad a los parámetros}
+
+Los barridos de Hamming implementados en el receptor (\texttt{experimento\_hamming\_vs\_a}, \texttt{\_vs\_b}, \texttt{\_vs\_c}) reejecutan la sincronización completa modificando un parámetro de Rössler cada vez. El resultado ilustra un comportamiento distinto del anterior:
+
+Un error de interpolación se propaga de forma \textbf{aditiva y acotada}, como se acaba de mostrar. Un error en los parámetros, en cambio, altera la propia dinámica del sistema esclavo: las trayectorias divergen exponencialmente y $x_s$ deja de guardar relación con $x_m$. La distancia de Hamming pasa entonces de valores próximos a cero a valores cercanos al 50\% de los bits, que es lo esperado al comparar dos secuencias sin correlación.
+
+Ambos mecanismos deben distinguirse al interpretar los resultados: el primero es un error numérico controlable mediante la elección del interpolante; el segundo es la sensibilidad a las condiciones que constituye el fundamento de seguridad del esquema.
+
+% =====================================================================
+\section{Resumen}
+% =====================================================================
+
+\begin{enumerate}[leftmargin=1.4cm, itemsep=0.35em]
+	\item El esclavo recibe la señal de acoplamiento $y_m$ como 36000 muestras discretas espaciadas $h = 0.01$.
+	\item El integrador RK45 requiere evaluar $y_m$ en instantes intermedios arbitrarios, impuestos por sus etapas internas y por el paso adaptativo.
+	\item El spline cúbico reconstruye una función $C^2$ que pasa por todas las muestras, resolviendo un sistema tridiagonal en $\mathcal{O}(N)$ operaciones.
+	\item Su error decae como $h^4$: sobre la señal del experimento resulta de $3.0\times10^{-7}$, frente a $2.9\times10^{-4}$ de la interpolación lineal.
+	\item La continuidad de las derivadas evita que el controlador de paso adaptativo reduzca $\Delta t$ innecesariamente, aunque este efecto solo se manifiesta con tolerancias más estrictas que las del experimento.
+	\item El acoplamiento con $K = 2.0$ convierte el coeficiente $a$ en $a - K = -1.8$, haciendo contractiva la dinámica del error y forzando la sincronización.
+	\item El error de interpolación actúa como forzamiento residual y fija un piso proporcional, $\|e_x\| \approx 7\times10^{-3}\,\|\varepsilon\|_{\infty}$; la constante es pequeña porque la dinámica del error filtra esa perturbación de alta frecuencia.
+	\item Ese error se traslada aditivamente a la imagen; tras el escalado por 100 y la cuantización a 8 bits, la interpolación cúbica queda holgadamente por debajo del umbral de alteración de un píxel, mientras que la lineal lo supera.
+\end{enumerate}
+
+\end{document}

@@ -1,0 +1,971 @@
+% =====================================================================
+%  Interpolación en la sincronización Rössler (esquema de Pecora-Carroll)
+%  Análisis matemático del módulo de sincronización del sistema esclavo
+%  Archivo fuente analizado: Esclavo_TLS KEYSTREAM.py
+% =====================================================================
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+% es-noshorthands desactiva los caracteres activos de babel-spanish («<», «>»),
+% que de otro modo entran en conflicto con la sintaxis de flechas de TikZ.
+\usepackage[spanish,es-tabla,es-noshorthands]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{tikz}
+\usepackage[hidelinks]{hyperref}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+% --- Entornos de enunciado (definidos con el núcleo de LaTeX, sin amsthm) ---
+% Cuerpo en cursiva: teoremas, proposiciones, lemas.
+\newtheorem{teorema}{Teorema}[section]
+\newtheorem{proposicion}[teorema]{Proposición}
+\newtheorem{lema}[teorema]{Lema}
+
+% Cuerpo en redonda: definiciones y observaciones.
+% El envoltorio reenvía el título opcional al entorno subyacente y restituye
+% la fuente redonda tras la cabecera.
+\newtheorem{definicionaux}[teorema]{Definición}
+\newenvironment{definicion}[1][]%
+  {\if\relax\detokenize{#1}\relax \definicionaux \else \definicionaux[#1]\fi
+   \normalfont}%
+  {\enddefinicionaux}
+
+\newtheorem{observacionaux}[teorema]{Observación}
+\newenvironment{observacion}[1][]%
+  {\if\relax\detokenize{#1}\relax \observacionaux \else \observacionaux[#1]\fi
+   \normalfont}%
+  {\endobservacionaux}
+
+% Entorno de demostración.
+\newenvironment{proof}[1][Demostración]%
+  {\par\medskip\noindent\textit{#1.}\space\ignorespaces}%
+  {\hfill$\square$\par\medskip}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\dnorm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\infnorm}[1]{\dnorm{#1}_{\infty}}
+
+\title{Interpolación en la sincronización caótica de Rössler\\
+       bajo el esquema de Pecora y Carroll\\[0.35em]
+       \large Análisis matemático del módulo de sincronización del sistema esclavo}
+\author{Documentación técnica del sistema de cifrado caótico\\
+        \texttt{Esclavo\_TLS KEYSTREAM.py}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% =====================================================================
+\section{Objeto del documento}
+% =====================================================================
+
+El sistema esclavo debe reconstruir, en su propia máquina, la misma señal caótica
+que el maestro utilizó para cifrar. Para lograrlo integra un oscilador de Rössler
+acoplado al del maestro mediante el esquema de sincronización de Pecora y Carroll.
+El acoplamiento requiere conocer una señal del maestro \emph{en todo instante de
+tiempo}; sin embargo, lo único que viaja por la red es una \emph{lista finita de
+muestras} de esa señal.
+
+Este documento desarrolla, de forma matemáticamente explícita, el papel que
+desempeña la interpolación dentro de ese proceso: qué objeto matemático construye,
+qué hueco lógico cubre, y por qué la calidad de esa reconstrucción determina
+directamente la calidad de la sincronización alcanzable. El desarrollo se apoya
+únicamente en las ecuaciones efectivamente implementadas en el código del sistema
+esclavo y en los valores de configuración que este comparte con el maestro.
+
+La línea argumental es la siguiente:
+
+\begin{enumerate}
+  \item El esquema de Pecora y Carroll garantiza sincronización \emph{siempre que
+        la señal guía esté disponible como función continua del tiempo}
+        (Secciones \ref{sec:planteamiento} y \ref{sec:error}).
+  \item El canal de comunicación solo entrega muestras discretas, y el integrador
+        numérico exige evaluaciones fuera de esa malla
+        (Sección \ref{sec:discreto}).
+  \item La interpolación es el operador que convierte las muestras en la función
+        continua que el esquema necesita, e introduce un error de reconstrucción
+        $\delta(t)$ (Sección \ref{sec:interpolacion}).
+  \item El error de sincronización queda acotado por una cantidad
+        \emph{proporcional} a $\infnorm{\delta}$: la interpolación no es un detalle
+        de implementación, sino el término que fija el piso del error
+        (Sección \ref{sec:resultado}).
+  \item El orden de aproximación del interpolante controla ese piso, y el spline
+        cúbico empleado reduce dicha cota de $\mathcal{O}(h)$ a $\mathcal{O}(h^4)$
+        (Sección \ref{sec:ordenes}).
+  \item Esa reducción se traduce, en la etapa de descifrado, en un margen
+        cuantificable frente al umbral de cuantización de los píxeles
+        (Sección \ref{sec:cripto}).
+\end{enumerate}
+
+Las mediciones experimentales asociadas (errores de sincronización, correlaciones,
+distancias de Hamming y tiempos de proceso) se encuentran documentadas por separado
+y no se reproducen aquí; este texto se ocupa exclusivamente de la justificación
+matemática del mecanismo.
+
+% =====================================================================
+\section{Planteamiento: maestro, esclavo y el esquema de Pecora--Carroll}
+\label{sec:planteamiento}
+% =====================================================================
+
+\subsection{El sistema maestro}
+
+El maestro integra el oscilador de Rössler en su forma autónoma clásica. Escribiendo
+el estado como $X_m(t) = \bigl(x_m(t),\,y_m(t),\,z_m(t)\bigr) \in \R^3$:
+
+\begin{equation}
+\label{eq:maestro}
+\left\{
+\begin{aligned}
+  \dot{x}_m &= -\,y_m - z_m,\\
+  \dot{y}_m &= x_m + a\,y_m,\\
+  \dot{z}_m &= b + z_m\,(x_m - c),
+\end{aligned}
+\right.
+\qquad X_m(0) = X_m^{0}.
+\end{equation}
+
+Los parámetros $(a,b,c)$ y la condición inicial $X_m^0$ constituyen parte de la
+clave del sistema. El campo vectorial de \eqref{eq:maestro} es polinomial, por lo
+tanto de clase $C^{\infty}$; en consecuencia toda solución $t \mapsto X_m(t)$ es
+también $C^{\infty}$ en su intervalo de existencia. Este hecho, aparentemente
+técnico, será decisivo más adelante: es exactamente la hipótesis de regularidad que
+permite justificar el uso de un interpolante de alto orden
+(Sección \ref{sec:ordenes}).
+
+El maestro utiliza la componente $x_m$ para enmascarar la información, y transmite
+la componente $y_m$ como \emph{señal guía}.
+
+\subsection{La descomposición de Pecora y Carroll}
+
+La idea de Pecora y Carroll consiste en partir el sistema en dos bloques: un
+\emph{subsistema conductor}, cuya señal se transmite, y un \emph{subsistema
+respuesta}, que se replica en el receptor y se deja gobernar por la señal recibida.
+En la formulación original, la réplica no integra la ecuación de la variable
+conductora: simplemente la sustituye por el valor recibido.
+
+Aquí la partición es
+\[
+  \underbrace{y}_{\text{conductor}}
+  \qquad\Big|\qquad
+  \underbrace{(x,\,z)}_{\text{respuesta}} ,
+\]
+y el subsistema respuesta impulsado por la señal $y_m(t)$ se escribe
+\begin{equation}
+\label{eq:respuesta}
+\left\{
+\begin{aligned}
+  \dot{x}_s &= -\,y_m(t) - z_s,\\
+  \dot{z}_s &= b + z_s\,(x_s - c).
+\end{aligned}
+\right.
+\end{equation}
+
+El criterio de Pecora y Carroll establece que la réplica \eqref{eq:respuesta}
+converge a la trayectoria del maestro, cualquiera que sea su condición inicial,
+si y solo si todos los \emph{exponentes de Lyapunov condicionales} del subsistema
+respuesta son negativos. Estos exponentes miden la tasa de crecimiento o
+decaimiento de perturbaciones \emph{transversales} a la variedad de sincronización
+\[
+  \mathcal{M} \;=\; \bigl\{\,(X_m, X_s) \in \R^3\times\R^3 \;:\; X_s = X_m \,\bigr\},
+\]
+y son «condicionales» porque se evalúan a lo largo de la trayectoria impuesta por
+el conductor, no sobre el sistema aislado.
+
+\subsection{La forma acoplada implementada}
+
+El sistema esclavo no realiza la sustitución literal, sino su versión
+\emph{acoplada} o difusiva, que es la que aparece en el código. Con
+$X_s(t)=(x_s,y_s,z_s)$:
+
+\begin{equation}
+\label{eq:esclavo}
+\boxed{
+\left\{
+\begin{aligned}
+  \dot{x}_s &= -\,y_s - z_s,\\
+  \dot{y}_s &= x_s + a\,y_s \;+\; k\,\bigl(\,y_m(t) - y_s\,\bigr),\\
+  \dot{z}_s &= b + z_s\,(x_s - c),
+\end{aligned}
+\right.}
+\qquad X_s(0) = X_s^{0} \neq X_m^{0}.
+\end{equation}
+
+El término $k\,(y_m - y_s)$, con ganancia de acoplamiento $k>0$, penaliza la
+discrepancia entre la variable $y$ local y la del maestro. Las dos formulaciones
+están relacionadas de manera transparente: al despejar
+\[
+  \frac{1}{k}\,\dot{y}_s \;=\; \frac{1}{k}\bigl(x_s + a y_s\bigr) + \bigl(y_m(t) - y_s\bigr),
+\]
+y hacer $k \to \infty$, el miembro izquierdo se anula y se obtiene
+$y_s \equiv y_m(t)$, es decir, la sustitución de Pecora y Carroll en sentido
+estricto. La forma \eqref{eq:esclavo} es entonces una regularización con ganancia
+finita del esquema original, y $k$ actúa como el parámetro que interpola entre
+«sistema desacoplado» ($k=0$) y «sustitución exacta» ($k\to\infty$).
+
+\begin{observacion}
+Obsérvese que $X_s^0 \neq X_m^0$ de manera deliberada: el maestro y el esclavo
+arrancan en puntos distintos del espacio de fases. Que dos sistemas caóticos con
+condiciones iniciales diferentes terminen recorriendo la misma trayectoria es,
+precisamente, el fenómeno que el esquema explota. En ausencia de acoplamiento la
+sensibilidad a condiciones iniciales las separaría exponencialmente.
+\end{observacion}
+
+\begin{table}[H]
+\centering
+\caption{Correspondencia entre la notación matemática y las variables del código.}
+\label{tab:notacion}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Símbolo} & \textbf{Significado} & \textbf{Identificador en el código} \\
+\midrule
+$y_m(t_n)$        & Muestras de la señal guía              & \texttt{y\_maestro} \\
+$t_n$             & Malla de instantes de muestreo         & \texttt{t\_maestro}, \texttt{times} \\
+$\hat{y}_m(t)$    & Guía reconstruida por interpolación    & \texttt{y\_maestro\_interp} \\
+$X_s(t)$          & Estado del esclavo                     & \texttt{sol\_esclavo.y} \\
+$k$               & Ganancia de acoplamiento               & \texttt{K} \\
+$h$               & Paso nominal de la malla               & \texttt{H} \\
+$N$               & Número total de muestras               & \texttt{tiempo\_sinc + keystream} \\
+$N_{\mathrm{sinc}}$ & Muestras reservadas al transitorio   & \texttt{tiempo\_sinc} \\
+$\alpha$          & Factor de escala de la imagen          & \texttt{IMG\_SCALE} \\
+$(a,b,c)$         & Parámetros de Rössler (clave)          & \texttt{ROSSLER\_PARAMS} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{La dinámica del error de sincronización}
+\label{sec:error}
+% =====================================================================
+
+\subsection{El sistema de error es exactamente lineal}
+
+Defínase el error de sincronización como la diferencia de estados
+\[
+  e(t) \;=\; X_s(t) - X_m(t) \;=\; \bigl(e_x(t),\,e_y(t),\,e_z(t)\bigr)^{\!\top}.
+\]
+
+Restando \eqref{eq:maestro} de \eqref{eq:esclavo} componente a componente, y
+suponiendo por el momento que el esclavo dispone de la señal guía exacta $y_m(t)$:
+
+\begin{align}
+  \dot{e}_x &= -e_y - e_z, \label{eq:ex}\\[0.2em]
+  \dot{e}_y &= e_x + a\,e_y + k\bigl(y_m - y_s\bigr)
+             = e_x + (a-k)\,e_y, \label{eq:ey}\\[0.2em]
+  \dot{e}_z &= z_s(x_s-c) - z_m(x_m-c). \label{eq:ez0}
+\end{align}
+
+La tercera ecuación merece un paso intermedio. Sumando y restando $z_m x_s$:
+\begin{align}
+  \dot{e}_z
+   &= z_s x_s - z_m x_m - c\,e_z \nonumber\\
+   &= \bigl(z_s - z_m\bigr)x_s + z_m\bigl(x_s - x_m\bigr) - c\,e_z \nonumber\\
+   &= \bigl(x_s(t) - c\bigr)\,e_z \;+\; z_m(t)\,e_x. \label{eq:ez}
+\end{align}
+
+Nótese que el término constante $b$ se cancela exactamente. Reuniendo
+\eqref{eq:ex}, \eqref{eq:ey} y \eqref{eq:ez}:
+
+\begin{equation}
+\label{eq:sistema-error}
+\dot{e} \;=\; J(t)\,e,
+\qquad
+J(t) \;=\;
+\begin{pmatrix}
+   0        & -1   & -1 \\
+   1        & a-k  & 0  \\
+   z_m(t)   & 0    & x_s(t)-c
+\end{pmatrix}.
+\end{equation}
+
+Conviene subrayar un punto: \eqref{eq:sistema-error} \emph{no} es una linealización
+ni una aproximación de primer orden. Es una identidad exacta. La no linealidad
+original quedó absorbida en los coeficientes $z_m(t)$ y $x_s(t)-c$, que son
+funciones conocidas del tiempo una vez fijadas las trayectorias. El sistema de
+error es, literalmente, un sistema lineal con coeficientes variables.
+
+\subsection{Condición de sincronización}
+
+Sea $\Phi(t,s)$ la matriz de transición de estados asociada a \eqref{eq:sistema-error},
+es decir, la solución matricial de
+\[
+  \frac{\partial}{\partial t}\Phi(t,s) = J(t)\,\Phi(t,s),
+  \qquad \Phi(s,s) = I_3 .
+\]
+La solución del sistema de error es entonces $e(t)=\Phi(t,0)\,e(0)$.
+
+\begin{definicion}[Sincronización exponencial]
+Se dice que el esquema sincroniza exponencialmente si existen constantes
+$M \ge 1$ y $\lambda > 0$ tales que
+\begin{equation}
+\label{eq:cota-transicion}
+  \dnorm{\Phi(t,s)} \;\le\; M\,e^{-\lambda\,(t-s)},
+  \qquad \text{para todo } t \ge s \ge 0 .
+\end{equation}
+\end{definicion}
+
+La constante $\lambda$ es la tasa de contracción transversal; su existencia
+equivale a que los exponentes de Lyapunov condicionales del subsistema respuesta
+sean estrictamente negativos, que es el criterio de Pecora y Carroll. Bajo
+\eqref{eq:cota-transicion} se tiene de inmediato
+\[
+  \dnorm{e(t)} \;\le\; M\,e^{-\lambda t}\,\dnorm{e(0)} \;\xrightarrow[t\to\infty]{}\; 0 ,
+\]
+esto es, sincronización completa para cualquier condición inicial del esclavo.
+
+\begin{observacion}[El papel de la ganancia $k$]
+En $J(t)$ la ganancia aparece únicamente en la entrada $(2,2)$, como $a-k$. Elegir
+$k > a$ vuelve negativa esa entrada diagonal y es el mecanismo que estabiliza la
+dirección transversal; incrementar $k$ tiende a aumentar $\lambda$ y por lo tanto a
+acelerar el transitorio. Se verá en la Sección \ref{sec:resultado} que esta ventaja
+tiene una contrapartida en presencia de una guía imperfecta.
+\end{observacion}
+
+\begin{observacion}[Interpretación del tiempo de sincronización]
+La cota $M e^{-\lambda t}\dnorm{e(0)}$ explica por qué el diseño reserva las
+primeras $N_{\mathrm{sinc}}$ muestras como periodo de sincronización antes de
+extraer el flujo de clave: son la ventana temporal concedida al transitorio para
+decaer. La señal de enmascaramiento se toma únicamente a partir del índice
+$N_{\mathrm{sinc}}$, cuando el primer término ya se ha vuelto despreciable.
+\end{observacion}
+
+% =====================================================================
+\section{El obstáculo real: la señal guía es discreta}
+\label{sec:discreto}
+% =====================================================================
+
+Toda la Sección \ref{sec:error} descansa sobre una suposición que la implementación
+no puede satisfacer literalmente: que el esclavo conoce $y_m(t)$ para todo
+$t$ real. Conviene examinar con precisión qué es lo que realmente recibe y qué es
+lo que realmente necesita.
+
+\subsection{Lo que el esclavo recibe}
+
+El maestro resuelve \eqref{eq:maestro} sobre una malla uniforme de $N$ instantes
+y transmite la evaluación de $y_m$ sobre ella. Formalmente, el esclavo recibe el
+conjunto finito de pares
+\begin{equation}
+\label{eq:datos}
+  \mathcal{D} \;=\; \bigl\{\,(t_n,\;\eta_n)\,\bigr\}_{n=0}^{N-1},
+  \qquad
+  \eta_n = y_m(t_n),
+  \qquad
+  t_n = n\,h ,
+\end{equation}
+con $h$ el paso de la malla y $N = N_{\mathrm{sinc}} + N_{\mathrm{key}}$. El
+conjunto $\mathcal{D}$ es un objeto \emph{discreto}: contiene información sobre
+$y_m$ en $N$ puntos y en ningún otro.
+
+\subsection{Lo que el integrador necesita}
+
+El esclavo integra \eqref{eq:esclavo} con un método Runge--Kutta explícito de
+paso adaptativo, de orden $5(4)$ del tipo Dormand--Prince. Un paso de este método,
+partiendo de $t$ con tamaño $\tau$, evalúa el campo vectorial en las etapas
+\begin{equation}
+\label{eq:etapas}
+  T_i \;=\; t + c_i\,\tau,
+  \qquad
+  (c_1,\dots,c_7) \;=\;
+  \Bigl(0,\;\tfrac{1}{5},\;\tfrac{3}{10},\;\tfrac{4}{5},\;\tfrac{8}{9},\;1,\;1\Bigr),
+\end{equation}
+y en cada una de ellas debe calcular
+\[
+  \dot{y}_s\big|_{T_i} \;=\; x_s + a\,y_s + k\,\bigl(\,y_m(T_i) - y_s\,\bigr),
+\]
+lo que exige el valor de la guía \emph{en el instante $T_i$}.
+
+Aquí aparece el conflicto de manera nítida. Aun en el caso más favorable de paso
+fijo $\tau = h$, los nodos intermedios
+\[
+  t_n + \tfrac{1}{5}h,\quad
+  t_n + \tfrac{3}{10}h,\quad
+  t_n + \tfrac{4}{5}h,\quad
+  t_n + \tfrac{8}{9}h
+\]
+\emph{no pertenecen} a la malla $\{t_n\}$: son puntos interiores de los intervalos.
+Y el método es de paso adaptativo, de modo que $\tau$ se ajusta continuamente
+según el control de error y en general $\tau \neq h$; los instantes solicitados son
+entonces esencialmente arbitrarios dentro de $[0, T]$.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=1.4cm,y=1cm,>=stealth]
+  % --- fila superior: lo que el canal entrega ---
+  \foreach \i in {0,1,2,3,4}{
+     \fill (\i,1.55) circle (2.2pt);
+     \draw[dashed,gray!55] (\i,1.45) -- (\i,0.16);
+  }
+  \node[anchor=west,font=\footnotesize] at (4.85,1.55)
+       {muestras $\eta_n$ recibidas};
+
+  % --- fila intermedia: lo que el integrador solicita ---
+  \foreach \x in {0.21,0.58,0.97,1.34,1.79,2.22,2.68,3.09,3.53,3.87}{
+     \draw[->] (\x,0.95) -- (\x,0.15);
+  }
+  \node[anchor=west,font=\footnotesize,align=left] at (4.85,0.70)
+       {instantes $T_i$ exigidos\\por el integrador};
+
+  % --- eje temporal y nodos de la malla ---
+  \draw[->,thick] (-0.35,0) -- (4.55,0) node[right,font=\footnotesize] {$t$};
+  \foreach \i/\lab in {0/{t_{n}},1/{t_{n+1}},2/{t_{n+2}},3/{t_{n+3}},4/{t_{n+4}}}{
+     \draw[thick] (\i,-0.13) -- (\i,0.13);
+     \node[below=2pt,font=\footnotesize] at (\i,-0.13) {$\lab$};
+  }
+\end{tikzpicture}
+\caption{La malla de muestreo y las evaluaciones requeridas por las etapas del
+método Runge--Kutta no coinciden. La interpolación es el operador que define
+$\hat{y}_m$ sobre todo el intervalo, y no solo sobre los nodos.}
+\label{fig:malla}
+\end{figure}
+
+\subsection{Formulación del problema}
+
+El problema queda planteado en términos precisos:
+
+\begin{quote}
+\emph{Construir, a partir del conjunto finito $\mathcal{D}$ de \eqref{eq:datos},
+una función $\hat{y}_m : [0,T] \to \R$ definida en todo punto, que pueda evaluarse
+en cualquier instante solicitado por el integrador y que aproxime a $y_m$ tan bien
+como sea posible.}
+\end{quote}
+
+Es exactamente el problema de interpolación. No se trata, por tanto, de un
+refinamiento opcional añadido para «suavizar» la señal: sin un operador de
+reconstrucción, el sistema \eqref{eq:esclavo} ni siquiera está definido como
+ecuación diferencial, porque su miembro derecho carece de valor en casi todo punto
+de $[0,T]$.
+
+% =====================================================================
+\section{La interpolación como reconstrucción de la señal guía}
+\label{sec:interpolacion}
+% =====================================================================
+
+\subsection{El operador de reconstrucción}
+
+Sea $\mathcal{I}$ un operador que a cada conjunto de muestras le asigna una función
+continua,
+\[
+  \mathcal{I} : \mathcal{D} \;\longmapsto\; \hat{y}_m = \mathcal{I}[\mathcal{D}] \in C[0,T].
+\]
+El sistema efectivamente integrado por el esclavo no es \eqref{eq:esclavo}, sino
+su versión con la guía reconstruida:
+
+\begin{equation}
+\label{eq:esclavo-real}
+\left\{
+\begin{aligned}
+  \dot{x}_s &= -\,y_s - z_s,\\
+  \dot{y}_s &= x_s + a\,y_s + k\,\bigl(\,\hat{y}_m(t) - y_s\,\bigr),\\
+  \dot{z}_s &= b + z_s\,(x_s - c).
+\end{aligned}
+\right.
+\end{equation}
+
+Esta distinción entre \eqref{eq:esclavo} y \eqref{eq:esclavo-real} es el eje de
+todo el análisis que sigue.
+
+\subsection{El spline cúbico}
+
+La implementación construye $\hat{y}_m$ como el \emph{spline cúbico interpolante}
+de los datos. Se recuerda su definición.
+
+\begin{definicion}[Spline cúbico interpolante]
+Dado $\mathcal{D}=\{(t_n,\eta_n)\}_{n=0}^{N-1}$ con $t_0<t_1<\cdots<t_{N-1}$, el
+spline cúbico interpolante es la única función $S:[t_0,t_{N-1}]\to\R$ que satisface:
+\begin{enumerate}
+  \item[(i)] \textbf{Estructura por tramos:} en cada subintervalo
+        $[t_n,t_{n+1}]$, $S$ coincide con un polinomio cúbico
+        \[
+          S_n(t)= \gamma_{0,n} + \gamma_{1,n}(t-t_n)
+                 + \gamma_{2,n}(t-t_n)^2 + \gamma_{3,n}(t-t_n)^3 .
+        \]
+  \item[(ii)] \textbf{Interpolación:} $S(t_n)=\eta_n$ para todo $n$.
+  \item[(iii)] \textbf{Regularidad:} $S \in C^{2}[t_0,t_{N-1}]$, es decir, $S$,
+        $S'$ y $S''$ son continuas en los nodos interiores.
+  \item[(iv)] \textbf{Condición de cierre:} dos condiciones adicionales en los
+        extremos. La implementación emplea la condición \emph{not-a-knot}, que
+        impone la continuidad de $S'''$ en $t_1$ y en $t_{N-2}$.
+\end{enumerate}
+\end{definicion}
+
+El conteo de grados de libertad confirma que el problema está bien planteado:
+$N-1$ tramos con $4$ coeficientes cada uno dan $4(N-1)$ incógnitas; las
+condiciones (ii) aportan $2(N-1)$ ecuaciones, la continuidad de $S'$ y $S''$ en los
+$N-2$ nodos interiores aporta $2(N-2)$, y las dos condiciones de cierre completan
+$4(N-1)$. El sistema resultante es tridiagonal y de diagonal dominante, lo que
+garantiza existencia, unicidad y estabilidad numérica de la solución.
+
+Las tres propiedades de la Definición anterior son exactamente las que el problema
+demanda:
+\begin{itemize}
+  \item la propiedad (i) permite evaluar $\hat{y}_m$ en cualquier instante, que era
+        el requisito de la Sección \ref{sec:discreto};
+  \item la propiedad (ii) asegura que en los nodos la reconstrucción es exacta, de
+        modo que no se introduce sesgo sobre la información efectivamente recibida;
+  \item la propiedad (iii) proporciona un miembro derecho de clase $C^2$ en $t$
+        para la ecuación \eqref{eq:esclavo-real}, condición de regularidad que los
+        métodos Runge--Kutta requieren para alcanzar su orden nominal.
+\end{itemize}
+
+\subsection{El error de reconstrucción}
+
+\begin{definicion}[Error de reconstrucción]
+Se define
+\begin{equation}
+\label{eq:delta}
+  \delta(t) \;=\; \hat{y}_m(t) - y_m(t),
+  \qquad t \in [0,T],
+  \qquad
+  \infnorm{\delta} \;=\; \sup_{t\in[0,T]} \lvert \delta(t)\rvert .
+\end{equation}
+\end{definicion}
+
+Por la propiedad de interpolación, $\delta(t_n)=0$ en todos los nodos; el error
+vive íntegramente en el interior de los subintervalos. La cantidad $\infnorm{\delta}$
+es la única característica del interpolante que intervendrá en el resultado
+principal.
+
+% =====================================================================
+\section{Resultado central: el error de sincronización está gobernado por $\delta$}
+\label{sec:resultado}
+% =====================================================================
+
+\subsection{El sistema de error perturbado}
+
+Se repite ahora el cálculo de la Sección \ref{sec:error}, pero partiendo del sistema
+realmente integrado, \eqref{eq:esclavo-real}. La única ecuación que cambia es la de
+$e_y$. Escribiendo $\hat{y}_m = y_m + \delta$:
+\begin{align}
+  \dot{e}_y
+  &= e_x + a\,e_y + k\bigl(\hat{y}_m(t) - y_s\bigr) \nonumber\\
+  &= e_x + a\,e_y + k\bigl(y_m(t) + \delta(t) - y_s\bigr) \nonumber\\
+  &= e_x + (a-k)\,e_y \;+\; k\,\delta(t).
+\end{align}
+
+Las ecuaciones de $e_x$ y $e_z$ son idénticas a las anteriores. Por lo tanto:
+
+\begin{equation}
+\label{eq:error-perturbado}
+\boxed{\;
+\dot{e} \;=\; J(t)\,e \;+\; k\,\delta(t)\,u ,
+\qquad
+u = \begin{pmatrix} 0\\ 1\\ 0\end{pmatrix} .
+\;}
+\end{equation}
+
+La lectura de \eqref{eq:error-perturbado} es directa y conceptualmente importante:
+\emph{interpolar imperfectamente equivale a inyectar una perturbación externa en el
+sistema de error}, con dos rasgos característicos. Primero, la perturbación actúa
+exclusivamente en la dirección $u$ de la variable acoplada. Segundo, su amplitud es
+$k\,\delta(t)$: la ganancia de acoplamiento, que estabiliza el sistema, amplifica
+simultáneamente el error de reconstrucción.
+
+\subsection{La cota del error de sincronización}
+
+\begin{teorema}[Piso del error de sincronización]
+\label{th:principal}
+Supóngase que se cumple la condición de sincronización exponencial
+\eqref{eq:cota-transicion} con constantes $M\ge 1$ y $\lambda>0$. Entonces la
+solución de \eqref{eq:error-perturbado} satisface, para todo $t\ge 0$,
+\begin{equation}
+\label{eq:cota-completa}
+  \dnorm{e(t)}
+  \;\le\;
+  \underbrace{M\,e^{-\lambda t}\,\dnorm{e(0)}}_{\text{(A) transitorio}}
+  \;+\;
+  \underbrace{\frac{k\,M}{\lambda}\,\bigl(1-e^{-\lambda t}\bigr)\,\infnorm{\delta}}_{\text{(B) piso}} ,
+\end{equation}
+y en consecuencia
+\begin{equation}
+\label{eq:cota-asintotica}
+  \limsup_{t\to\infty}\;\dnorm{e(t)}
+  \;\le\;
+  \frac{k\,M}{\lambda}\;\infnorm{\delta}\, .
+\end{equation}
+\end{teorema}
+
+\begin{proof}
+La fórmula de variación de las constantes aplicada a
+\eqref{eq:error-perturbado} da
+\[
+  e(t) \;=\; \Phi(t,0)\,e(0) \;+\; k\int_{0}^{t} \Phi(t,s)\,u\,\delta(s)\,\mathrm{d}s .
+\]
+Tomando normas y usando la desigualdad triangular junto con
+$\dnorm{u}=1$ y $\lvert\delta(s)\rvert \le \infnorm{\delta}$:
+\[
+  \dnorm{e(t)}
+  \;\le\; \dnorm{\Phi(t,0)}\,\dnorm{e(0)}
+        + k\,\infnorm{\delta}\int_{0}^{t}\dnorm{\Phi(t,s)}\,\mathrm{d}s .
+\]
+Sustituyendo la cota \eqref{eq:cota-transicion} y evaluando la integral,
+\[
+  \int_{0}^{t} M\,e^{-\lambda(t-s)}\,\mathrm{d}s
+  \;=\; \frac{M}{\lambda}\bigl(1-e^{-\lambda t}\bigr),
+\]
+se obtiene \eqref{eq:cota-completa}. Haciendo $t\to\infty$ el término (A) se anula
+y $1-e^{-\lambda t}\to 1$, lo que produce \eqref{eq:cota-asintotica}.
+\end{proof}
+
+\subsection{Interpretación}
+
+El Teorema \ref{th:principal} descompone el error de sincronización en dos
+contribuciones de naturaleza completamente distinta:
+
+\begin{itemize}
+  \item El \textbf{término transitorio} (A) depende de la discrepancia de
+        condiciones iniciales y decae exponencialmente. Se combate
+        \emph{esperando}: es la función del periodo de sincronización
+        $N_{\mathrm{sinc}}$. Ningún refinamiento del interpolante lo mejora, y
+        tampoco hace falta.
+  \item El \textbf{término de piso} (B) \emph{no decae}. Es una cota permanente,
+        proporcional a $\infnorm{\delta}$, que persiste indefinidamente por mucho
+        que se prolongue la integración. Aumentar $N_{\mathrm{sinc}}$ no lo reduce.
+        La única palanca disponible sobre él es la calidad del operador de
+        reconstrucción.
+\end{itemize}
+
+Esta separación responde con precisión a la pregunta que motiva el documento. La
+interpolación es el mecanismo que actúa sobre el segundo término, es decir, sobre
+el error residual que subsiste una vez agotado el transitorio. Cuanto menor sea
+$\infnorm{\delta}$, más bajo será el piso al que puede descender el error de
+sincronización.
+
+Dos casos límite ilustran el alcance del resultado:
+\[
+  \delta \equiv 0
+  \;\Longrightarrow\;
+  \dnorm{e(t)} \le M e^{-\lambda t}\dnorm{e(0)} \to 0
+  \quad\text{(sincronización idéntica)},
+\]
+mientras que con una reconstrucción burda el piso puede quedar por encima de la
+tolerancia admisible para la aplicación, y en ese caso la sincronización
+—aunque el criterio de Pecora y Carroll se cumpla— resulta inservible en la
+práctica.
+
+\begin{observacion}[El compromiso en la elección de $k$]
+La ganancia $k$ aparece en el numerador de \eqref{eq:cota-asintotica} y, a la vez,
+influye en $\lambda$ a través de la entrada $a-k$ de $J(t)$. Aumentar $k$ acelera
+el transitorio (A) pero amplifica el piso (B). Este compromiso desaparece en la
+medida en que $\infnorm{\delta}$ sea pequeño: con una reconstrucción de alto orden,
+el término $k\,\infnorm{\delta}/\lambda$ permanece reducido incluso para ganancias
+grandes, y $k$ puede elegirse atendiendo a la velocidad de convergencia sin pagar
+un precio apreciable en precisión.
+\end{observacion}
+
+% =====================================================================
+\section{El orden del interpolante y la magnitud del piso}
+\label{sec:ordenes}
+% =====================================================================
+
+Establecido que el piso del error es proporcional a $\infnorm{\delta}$, resta
+cuantificar $\infnorm{\delta}$ para distintas elecciones del operador
+$\mathcal{I}$. Las cotas siguientes son resultados clásicos de teoría de la
+aproximación; se enuncian sobre una malla uniforme de paso $h$ y para una función
+$y_m$ suficientemente regular. Se emplea la notación
+\[
+  M_r \;=\; \infnorm{y_m^{(r)}} \;=\; \sup_{t\in[0,T]}\bigl\lvert y_m^{(r)}(t)\bigr\rvert .
+\]
+
+\subsection{Retención de orden cero}
+
+La alternativa más simple consiste en congelar la última muestra disponible,
+\[
+  \hat{y}_m^{\,\mathrm{ZOH}}(t) = \eta_n \quad\text{para } t\in[t_n,t_{n+1}).
+\]
+Por el teorema del valor medio, para $t$ en dicho intervalo existe $\xi$ con
+$\lvert y_m(t)-\eta_n\rvert = \lvert y_m'(\xi)\rvert\,(t-t_n)$, de donde
+\begin{equation}
+\label{eq:cota-zoh}
+  \infnorm{\delta_{\mathrm{ZOH}}} \;\le\; M_1\,h \;=\; \mathcal{O}(h).
+\end{equation}
+Esta reconstrucción es discontinua en cada nodo. Además de su bajo orden, esa
+discontinuidad viola la hipótesis de regularidad temporal del campo vectorial que
+sostiene el análisis de orden de los métodos Runge--Kutta.
+
+\subsection{Interpolación lineal por tramos}
+
+Uniendo muestras consecutivas mediante segmentos rectos, el error clásico de
+interpolación de Lagrange con dos nodos da
+\begin{equation}
+\label{eq:cota-lineal}
+  \infnorm{\delta_{\mathrm{lin}}} \;\le\; \frac{M_2}{8}\,h^{2} \;=\; \mathcal{O}(h^{2}).
+\end{equation}
+El resultado es continuo, pero su derivada presenta saltos en los nodos: la
+reconstrucción es $C^0$ y no $C^1$.
+
+\subsection{Spline cúbico}
+
+\begin{teorema}[Cota de error del spline cúbico]
+\label{th:spline}
+Sea $y_m \in C^{4}[t_0,t_{N-1}]$ y sea $S$ su spline cúbico interpolante sobre una
+malla uniforme de paso $h$. Entonces
+\begin{equation}
+\label{eq:cota-spline}
+  \infnorm{S - y_m} \;\le\; \frac{5}{384}\,M_4\,h^{4} \;=\; \mathcal{O}(h^{4}),
+\end{equation}
+y para la primera derivada
+\begin{equation}
+\label{eq:cota-spline-derivada}
+  \infnorm{S' - y_m'} \;\le\; \frac{1}{24}\,M_4\,h^{3}.
+\end{equation}
+\end{teorema}
+
+La hipótesis $y_m\in C^4$ se satisface holgadamente: como se señaló en la
+Sección \ref{sec:planteamiento}, $y_m$ es solución de un sistema polinomial y por
+tanto $y_m\in C^{\infty}$. Sobre el atractor —conjunto acotado— las derivadas de
+todo orden permanecen acotadas, de modo que $M_4<\infty$. Es decir, la propia
+naturaleza del sistema de Rössler es lo que legitima el empleo de un interpolante
+de cuarto orden: la señal guía es exactamente el tipo de función para el que el
+Teorema \ref{th:spline} rinde su máximo provecho.
+
+\subsection{Comparación de las cotas}
+
+Combinando el Teorema \ref{th:principal} con las cotas anteriores se obtiene, para
+cada operador de reconstrucción, el piso correspondiente:
+
+\begin{table}[H]
+\centering
+\caption{Regularidad, orden de aproximación y piso resultante del error de
+sincronización según el operador de reconstrucción.}
+\label{tab:ordenes}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Reconstrucción} & \textbf{Regularidad} & $\infnorm{\delta}$ &
+\textbf{Piso } $\displaystyle\limsup_t \dnorm{e(t)}$ \\
+\midrule
+Orden cero (retención) & discontinua & $M_1 h$              & $\dfrac{kM}{\lambda}M_1\,h$ \\[0.9em]
+Lineal por tramos      & $C^{0}$     & $\dfrac{M_2}{8}h^{2}$ & $\dfrac{kM}{8\lambda}M_2\,h^{2}$ \\[0.9em]
+\textbf{Spline cúbico} & $C^{2}$     & $\dfrac{5M_4}{384}h^{4}$ & $\dfrac{5kM}{384\lambda}M_4\,h^{4}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+El cociente entre el piso de la retención de orden cero y el del spline cúbico es
+\begin{equation}
+\label{eq:ganancia}
+  \rho \;=\;
+  \frac{M_1\,h}{\dfrac{5}{384}M_4\,h^{4}}
+  \;=\;
+  \frac{384}{5}\cdot\frac{M_1}{M_4}\cdot\frac{1}{h^{3}} .
+\end{equation}
+
+La estructura de \eqref{eq:ganancia} es lo relevante: el factor $h^{-3}$ crece sin
+límite conforme se refina la malla. Con el paso empleado en el sistema, $h$ es del
+orden de $10^{-2}$, de modo que solo el término $h^{-3}$ contribuye un factor de
+$10^{6}$ a favor del spline. Debe subrayarse que \eqref{eq:ganancia} compara
+\emph{cotas superiores} y no errores medidos; su valor es indicar el orden de
+magnitud de la mejora estructural que aporta la interpolación de alto orden, no
+predecir una cifra concreta.
+
+\subsection{Consistencia con el orden del integrador}
+
+Existe un segundo argumento, independiente del anterior, a favor del spline. El
+método de integración empleado es de orden $5(4)$: su error local por paso se
+comporta como $\mathcal{O}(\tau^{5})$ y su error global como
+$\mathcal{O}(\tau^{4})$. Ahora bien, la precisión efectiva del resultado está
+limitada por el peor de los dos términos que la componen:
+\[
+  \text{error total}
+  \;\sim\;
+  \underbrace{\mathcal{O}(\tau^{4})}_{\text{integrador}}
+  \;+\;
+  \underbrace{\mathcal{O}\bigl(\infnorm{\delta}\bigr)}_{\text{reconstrucción de la guía}} .
+\]
+
+Con una retención de orden cero, el segundo sumando es $\mathcal{O}(h)$ y domina
+por completo: la precisión del conjunto degenera a primer orden y todo el esfuerzo
+computacional invertido en un integrador de orden cinco se desperdicia. A ello se
+añade que un miembro derecho discontinuo en $t$ invalida los desarrollos de Taylor
+sobre los que se demuestran las condiciones de orden del método, por lo que ni
+siquiera el orden reducido está garantizado de manera limpia.
+
+Con el spline cúbico, en cambio, el segundo sumando es $\mathcal{O}(h^{4})$, del
+mismo orden que el primero, y la reconstrucción de la guía deja de ser el eslabón
+débil. La regularidad $C^{2}$ del spline provee además el miembro derecho suave
+que la teoría del método presupone. Interpolación e integración quedan así
+\emph{equilibradas en orden}, que es la condición de diseño correcta cuando se
+acopla un reconstructor de señal a un integrador numérico.
+
+% =====================================================================
+\section{Consecuencia sobre el descifrado}
+\label{sec:cripto}
+% =====================================================================
+
+Para cerrar el argumento conviene seguir el error de sincronización hasta su efecto
+final sobre la imagen recuperada, ya que es allí donde se manifiesta la utilidad
+práctica de todo lo anterior.
+
+\subsection{Del error de sincronización al error de píxel}
+
+Sea $d_j$ el $j$-ésimo valor del vector difundido en el maestro, $\ell_j$ el término
+del mapa logístico y $\alpha$ el factor de escala. La etapa de confusión produce
+\begin{equation}
+\label{eq:cifrado}
+  c_j \;=\; \alpha\,d_j \;+\; \ell_j \;+\; x_m(t_{n_j}),
+\end{equation}
+donde $t_{n_j}$ recorre los instantes posteriores al periodo de sincronización. El
+esclavo regenera $\ell_j$ de forma exacta —el mapa logístico es una recurrencia
+determinista que no depende de la sincronización— y despeja
+\begin{equation}
+\label{eq:descifrado}
+  \hat{d}_j \;=\; \frac{1}{\alpha}\Bigl(\,c_j - \ell_j - x_s(t_{n_j})\,\Bigr).
+\end{equation}
+
+Restando \eqref{eq:descifrado} de la expresión exacta obtenida a partir de
+\eqref{eq:cifrado}:
+\begin{equation}
+\label{eq:error-pixel}
+\boxed{\;
+  \hat{d}_j - d_j
+  \;=\;
+  \frac{1}{\alpha}\Bigl(x_m(t_{n_j}) - x_s(t_{n_j})\Bigr)
+  \;=\;
+  -\,\frac{1}{\alpha}\;e_x(t_{n_j}) .
+\;}
+\end{equation}
+
+El error de reconstrucción de cada píxel es, exactamente, el error de
+sincronización de la componente $x$ \emph{amplificado por el factor} $1/\alpha$.
+Con el valor de escala empleado en el sistema, $\alpha = 10^{-2}$, dicho factor es
+$100$: cualquier discrepancia en la sincronización se magnifica dos órdenes de
+magnitud al llegar al dominio de la imagen.
+
+\subsection{El umbral de cuantización}
+
+La reconstrucción final cuantiza los valores a enteros de ocho bits mediante
+$\mathrm{round}(255\,\hat{d}_j)$. El redondeo devuelve el entero correcto siempre
+que el error se mantenga por debajo de medio nivel de cuantización:
+\[
+  255\,\bigl\lvert \hat{d}_j - d_j \bigr\rvert \;<\; \tfrac{1}{2}
+  \qquad\Longleftrightarrow\qquad
+  \bigl\lvert \hat{d}_j - d_j \bigr\rvert \;<\; \frac{1}{510}.
+\]
+Sustituyendo \eqref{eq:error-pixel} se obtiene la condición suficiente de
+recuperación exacta:
+\begin{equation}
+\label{eq:umbral}
+  \bigl\lvert e_x(t_{n_j}) \bigr\rvert \;<\; \frac{\alpha}{510}
+  \;\approx\; 2\times 10^{-5}.
+\end{equation}
+
+Y combinando \eqref{eq:umbral} con el Teorema \ref{th:principal}, la exigencia
+sobre el interpolante se vuelve explícita:
+\begin{equation}
+\label{eq:exigencia}
+  \frac{k\,M}{\lambda}\,\infnorm{\delta} \;<\; \frac{\alpha}{510}.
+\end{equation}
+
+La desigualdad \eqref{eq:exigencia} resume el papel de la interpolación en el
+sistema completo. El umbral del miembro derecho es estrecho, y el factor de
+amplificación $1/\alpha$ lo estrecha aún más; un piso de error de orden
+$\mathcal{O}(h)$ difícilmente lo satisface, mientras que un piso de orden
+$\mathcal{O}(h^{4})$ deja un margen amplio. La interpolación por spline cúbico
+es, en definitiva, lo que permite reducir el error de sincronización hasta situarlo
+holgadamente por debajo del umbral que la cuantización impone, y con ello hacer
+viable la recuperación fiel de la información cifrada.
+
+% =====================================================================
+\section{Detalles de implementación explicados por el análisis}
+\label{sec:detalles}
+% =====================================================================
+
+Varias decisiones concretas del código encuentran su justificación en el desarrollo
+anterior.
+
+\paragraph{Mallas idénticas en ambos extremos.}
+Maestro y esclavo construyen su malla temporal con la misma expresión, sobre
+$N=N_{\mathrm{sinc}}+N_{\mathrm{key}}$ puntos equiespaciados en $[0,\,Nh]$. El paso
+efectivo resultante es
+\[
+  h_{\mathrm{ef}} \;=\; \frac{N\,h}{N-1} \;=\; h\Bigl(1+\frac{1}{N-1}\Bigr),
+\]
+ligeramente superior al valor nominal $h$. Lo relevante no es el valor exacto sino
+la coincidencia: al emplear ambos extremos la misma construcción, los nodos del
+interpolante son los mismos instantes en los que el maestro evaluó la señal, y la
+propiedad $\delta(t_n)=0$ se conserva. Una discrepancia entre las dos mallas
+introduciría un desplazamiento sistemático en $\delta$ que ningún refinamiento del
+interpolante podría corregir.
+
+\paragraph{Extrapolación en la frontera.}
+El interpolante se configura para admitir evaluación fuera de $[t_0,t_{N-1}]$. Esto
+no responde a una necesidad de extender el dominio, sino a una particularidad del
+paso adaptativo: al aproximarse al extremo final del intervalo, el integrador puede
+proponer tentativamente un paso que rebase $t_{N-1}$ antes de reducirlo. Permitir
+la extrapolación evita que dicha evaluación tentativa aborte la integración. El
+número de puntos afectados es despreciable y ninguno de ellos contribuye al flujo
+de clave.
+
+\paragraph{Extracción del flujo de clave tras el transitorio.}
+El vector de enmascaramiento se toma de la componente $x_s$ a partir del índice
+$N_{\mathrm{sinc}}$. Según \eqref{eq:cota-completa}, ese índice delimita la región
+temporal en la que el término (A) ya ha decaído y solo subsiste el piso (B). La
+elección de $N_{\mathrm{sinc}}$ es, en esencia, la elección de un $t^{*}$ tal que
+$M e^{-\lambda t^{*}}\dnorm{e(0)}$ resulte despreciable frente a
+$k M \infnorm{\delta}/\lambda$.
+
+\paragraph{Tolerancias del integrador.}
+Maestro y esclavo emplean las mismas tolerancias relativa y absoluta en el control
+de paso adaptativo. Es pertinente señalar que estas tolerancias establecen un piso
+de error adicional, de origen distinto al analizado aquí. La interpolación elimina
+la contribución correspondiente a la reconstrucción de la señal guía; una vez que
+esa contribución deja de ser dominante, el error residual queda determinado por los
+demás términos, y ajustar las tolerancias pasa a ser la palanca pertinente. El
+análisis de este documento identifica cuál de los pisos controla la interpolación,
+no afirma que sea el único existente.
+
+% =====================================================================
+\section{Síntesis}
+% =====================================================================
+
+El argumento completo puede resumirse en cinco proposiciones encadenadas.
+
+\begin{enumerate}
+  \item El esquema de Pecora y Carroll, en su forma acoplada \eqref{eq:esclavo},
+        conduce a un sistema de error \emph{exactamente lineal}
+        $\dot{e}=J(t)e$, que converge a cero de manera exponencial cuando los
+        exponentes de Lyapunov condicionales del subsistema respuesta son
+        negativos. Esta garantía presupone disponer de la señal guía como función
+        continua del tiempo.
+
+  \item El canal de comunicación entrega únicamente $N$ muestras discretas, en
+        tanto que el integrador Runge--Kutta de paso adaptativo requiere evaluar la
+        guía en instantes intermedios que no pertenecen a la malla. Sin un operador
+        de reconstrucción, la ecuación del esclavo carece de definición en casi
+        todo punto.
+
+  \item La interpolación por spline cúbico construye ese operador: una función
+        definida en todo el intervalo, exacta en los nodos y de clase $C^{2}$. Su
+        discrepancia respecto de la señal verdadera es
+        $\delta(t)=\hat{y}_m(t)-y_m(t)$.
+
+  \item Al integrar con la guía reconstruida, el sistema de error se convierte en
+        $\dot{e}=J(t)e+k\,\delta(t)\,u$, y su solución se descompone en un
+        transitorio que decae exponencialmente —eliminado por el periodo de
+        sincronización— y un piso permanente acotado por
+        $k M \infnorm{\delta}/\lambda$. El piso es insensible al tiempo de
+        integración y depende exclusivamente de la calidad de la interpolación.
+
+  \item Las cotas clásicas de aproximación sitúan $\infnorm{\delta}$ en
+        $\mathcal{O}(h)$ para una retención de orden cero y en $\mathcal{O}(h^{4})$
+        para el spline cúbico, orden este último que además equilibra la
+        reconstrucción con el orden del integrador. Aplicar la interpolación en el
+        proceso de sincronización significa, por tanto, sustituir un piso de error
+        de primer orden por uno de cuarto orden, lo que permite reducir el error de
+        sincronización y situarlo por debajo del umbral que la cuantización de la
+        imagen impone al descifrado.
+\end{enumerate}
+
+En una frase: dentro de este sistema, interpolar es reconstruir la señal guía que
+el esquema de Pecora y Carroll exige y el canal no puede entregar, y el orden de
+esa reconstrucción es lo que fija el error de sincronización residual.
+
+\end{document}
